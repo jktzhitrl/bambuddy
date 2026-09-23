@@ -170,6 +170,16 @@ Im bestehenden Code sind nur wenige Zeilen ergänzt, alle mit
 - `backend/tests/unit/test_outbound_url_ssrf_guards.py`: Supabase-Adresse als
   geprüfte URL eingetragen
 
+Für Name und Logo „Druckübersicht“ zusätzlich (ebenfalls markiert bzw. nur
+Texte/Bilder): `frontend/index.html`, `frontend/public/manifest.json`,
+`frontend/public/img/` (Logo, Favicons, App-Symbole), `Layout.tsx`,
+`LoginPage.tsx`, `SetupPage.tsx`, `CameraPage.tsx`, `StreamOverlayPage.tsx`
+(nur Seitentitel), die Texte in `i18n/locales/de.ts` und `en.ts`,
+`app_name` in `notification_service.py` und `email_service.py`, zwei
+Frontend-Tests, die den Namen prüfen, und `container_name` in
+`docker-compose.yml`. Bei Konflikten in `de.ts`/`en.ts` einfach die Version
+vom Original nehmen und „Bambuddy“ in den Texten wieder ersetzen.
+
 Update einspielen:
 
 ```bash

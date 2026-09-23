@@ -45,6 +45,8 @@ export interface Konfig {
   schlafen: string;
   aufstehen: string;
   puffer_minuten: number;
+  melden_an: number[];
+  melden: string[];
   eingerichtet?: boolean;
 }
 
@@ -135,6 +137,11 @@ export interface ArchivAuswahl {
   druckzeit_s: number | null;
 }
 
+export interface Benachrichtigung {
+  kanaele: { id: number; name: string; typ: string; aktiv: boolean }[];
+  ereignisse: { id: string; titel: string }[];
+}
+
 export interface DruckerAuswahl {
   id: number;
   name: string;
@@ -149,6 +156,8 @@ export const lagerAutodruckApi = {
   konfigSpeichern: (k: Konfig) => anfrage<Konfig>('/konfig', { method: 'PUT', body: json(k) }),
   verbindungTesten: () => anfrage<{ ok: boolean; meldung: string }>('/verbindung-testen', { method: 'POST' }),
   status: () => anfrage<Status>('/status'),
+  benachrichtigung: () => anfrage<Benachrichtigung>('/benachrichtigung/kanaele'),
+  benachrichtigungTesten: () => anfrage<{ ok: boolean; meldung: string }>('/benachrichtigung/testen', { method: 'POST' }),
   pruefen: () => anfrage<Record<string, unknown>>('/pruefen', { method: 'POST' }),
   teile: () => anfrage<LagerTeil[]>('/teile'),
   archive: (q: string) => anfrage<ArchivAuswahl[]>(`/archive?q=${encodeURIComponent(q)}`),

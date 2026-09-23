@@ -33,10 +33,11 @@ from backend.app.models.lager_autodruck import (
     LagerDruckJob,
     LagerDruckRegel,
 )
+from backend.app.models.notification import NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
-from backend.app.services.lager_autodruck import konfig, nachtruhe
+from backend.app.services.lager_autodruck import konfig, melden, nachtruhe
 from backend.app.services.lager_autodruck.service import dateiname_aus_archiv, lager_autodruck_service
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import utcnow_naive
@@ -71,6 +72,16 @@ class KonfigDaten(BaseModel):
     schlafen: str = "22:00"
     aufstehen: str = "07:00"
     puffer_minuten: int = Field(15, ge=0, le=240)
+    melden_an: list[int] = Field(default_factory=list)
+    melden: list[str] = Field(default_factory=lambda: list(konfig.MELDEN_STANDARD))
+
+    @field_validator("melden")
+    @classmethod
+    def _melden(cls, v: list[str]) -> list[str]:
+        unbekannt = set(v) - set(melden.EREIGNISSE)
+        if unbekannt:
+            raise ValueError(f"Unbekannte Meldung(en): {', '.join(sorted(unbekannt))}")
+        return list(dict.fromkeys(v))
 
 
 def _konfig_antwort(k: konfig.Konfig) -> dict:
@@ -121,6 +132,8 @@ async def konfig_speichern(
         schlafen=nachtruhe.uhrzeit(daten.schlafen).strftime("%H:%M"),
         aufstehen=nachtruhe.uhrzeit(daten.aufstehen).strftime("%H:%M"),
         puffer_minuten=daten.puffer_minuten,
+        melden_an=list(dict.fromkeys(daten.melden_an)),
+        melden=daten.melden,
     )
     await konfig.speichern(db, neu)
     lager_autodruck_service.aufwecken()
@@ -140,6 +153,38 @@ async def verbindung_testen(
     except LagerFehler as e:
         return {"ok": False, "meldung": str(e)}
     return {"ok": True, "meldung": f"Verbunden - {len(teile)} Teile im Lager gefunden."}
+
+
+@router.get("/benachrichtigung/kanaele")
+async def kanaele_lesen(
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
+):
+    """Bambuddys Benachrichtigungs-Kanaele zur Auswahl, plus die moeglichen Meldungen."""
+    kanaele = (await db.execute(select(NotificationProvider).order_by(NotificationProvider.name))).scalars().all()
+    return {
+        "kanaele": [{"id": p.id, "name": p.name, "typ": p.provider_type, "aktiv": bool(p.enabled)} for p in kanaele],
+        "ereignisse": [{"id": k, "titel": t} for k, t in melden.EREIGNISSE.items()],
+    }
+
+
+@router.post("/benachrichtigung/testen")
+async def benachrichtigung_testen(
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_UPDATE),
+):
+    k = await konfig.laden(db)
+    anzahl = await melden.senden(
+        db,
+        k,
+        "test",
+        "Lager-Autodruck: Testnachricht",
+        "So sehen Meldungen vom Lager-Autodruck aus.",
+        erzwingen=True,
+    )
+    if not anzahl:
+        return {"ok": False, "meldung": "Kein aktiver Kanal ausgewählt (erst speichern)."}
+    return {"ok": True, "meldung": f"Testnachricht an {anzahl} Kanal/Kanäle gesendet."}
 
 
 # --- Auswahllisten fuer die Regeln ----------------------------------------------

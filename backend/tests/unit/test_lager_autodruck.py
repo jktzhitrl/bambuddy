@@ -531,3 +531,96 @@ async def test_nachtruhe_haelt_langen_druck_zurueck(umgebung, db_session, utc):
     (item,) = await _alle(sessions, PrintQueueItem)
     assert item.scheduled_time is None
     assert service.naechste_grenze == datetime(2026, 9, 24, 12, 0)
+
+
+# --- Benachrichtigungen -------------------------------------------------------------
+
+
+@pytest.fixture
+async def gemeldet(umgebung, db_session):
+    """Kanal anlegen, im Autodruck auswaehlen und gesendete Meldungen mitschneiden."""
+    from backend.app.models.notification import NotificationProvider
+
+    kanal = NotificationProvider(name="Handy", provider_type="ntfy", config="{}", enabled=True)
+    db_session.add(kanal)
+    await db_session.commit()
+    k = await konfig.laden(db_session)
+    k.melden_an = [kanal.id]
+    k.melden = ["freigabe", "buchungsfehler", "angehalten", "lager_offline"]
+    await konfig.speichern(db_session, k)
+
+    meldungen = []
+
+    async def fake_senden(providers, title, message, db, event_type="unknown", **kw):
+        meldungen.append((event_type, title, message, [p.name for p in providers]))
+
+    with patch("backend.app.services.notification_service.notification_service._send_to_providers", fake_senden):
+        yield meldungen
+
+
+async def test_meldung_bei_freigabe(umgebung, gemeldet):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_FREIGABE, stueck_je_druck=10)
+    await service.durchlauf()
+    ((ereignis, titel, text, kanaele),) = gemeldet
+    assert ereignis == "lager_autodruck_freigabe" and kanaele == ["Handy"]
+    assert "Halter" in text
+    # Naechster Lauf plant nichts Neues -> keine neue Meldung.
+    await service.durchlauf()
+    assert len(gemeldet) == 1
+
+
+async def test_eingeplant_nur_wenn_gewaehlt(umgebung, gemeldet):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_AUTOMATISCH, stueck_je_druck=10)
+    await service.durchlauf()
+    assert gemeldet == []  # "eingeplant" ist standardmaessig aus
+
+
+async def test_meldung_nach_drei_buchungsfehlern_einmal(umgebung, gemeldet):
+    service, lager, drucker, archiv, sessions = umgebung
+    lager.fehler = True
+    await service.bei_druckende(drucker.id, {"status": "completed", "subtask_name": "Deckel"}, None, None)
+    for _ in range(4):
+        await service.durchlauf()
+    buchungsfehler = [m for m in gemeldet if m[0] == "lager_autodruck_buchungsfehler"]
+    assert len(buchungsfehler) == 1 and "Deckel" in buchungsfehler[0][2]
+
+
+async def test_meldung_wenn_lager_nicht_verbucht(umgebung, gemeldet):
+    service, lager, drucker, archiv, sessions = umgebung
+    lager.antwort = "unbekannt"
+    await service.bei_druckende(drucker.id, {"status": "completed", "subtask_name": "Deckel"}, None, None)
+    ((ereignis, titel, text, _),) = gemeldet
+    assert ereignis == "lager_autodruck_buchungsfehler" and "unbekannt" in text
+
+
+async def test_meldung_regel_angehalten_einmal(umgebung, gemeldet):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+    lager.antwort = "unbekannt"
+    await service.durchlauf()
+    (item,) = await _alle(sessions, PrintQueueItem)
+    await service.bei_druckende(drucker.id, {"status": "completed"}, item.id, archiv.id)
+    await service.durchlauf()
+    await service.durchlauf()
+    angehalten = [m for m in gemeldet if m[0] == "lager_autodruck_angehalten"]
+    assert len(angehalten) == 1
+
+
+async def test_meldung_lager_offline_und_wieder_da(umgebung, gemeldet, monkeypatch):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+
+    async def kaputt():
+        raise LagerFehler("Zeitueberschreitung")
+
+    original = lager.lade_bestandsdaten
+    monkeypatch.setattr(lager, "lade_bestandsdaten", kaputt)
+    for _ in range(4):
+        await service.durchlauf()
+    assert [m[1] for m in gemeldet] == ["Lager-Autodruck: Lager nicht erreichbar"]
+
+    monkeypatch.setattr(lager, "lade_bestandsdaten", original)
+    await service.durchlauf()
+    assert gemeldet[-1][1] == "Lager-Autodruck: Lager wieder erreichbar"

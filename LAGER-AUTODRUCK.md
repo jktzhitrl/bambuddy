@@ -58,6 +58,14 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   Meldungen werden zuerst lokal gespeichert und bei Netzproblemen automatisch
   erneut gesendet. Drucke, die in der Warteschlange abgebrochen wurden, werden
   nicht verbucht.
+- **Benachrichtigungen** (Einstellungen): Bambuddy meldet sich über die
+  vorhandenen Kanäle (ntfy, Telegram, E-Mail …, angelegt unter
+  *Einstellungen → Benachrichtigungen*), wenn ein Druck auf Freigabe wartet, eine
+  Buchung nach 3 Versuchen nicht ankommt oder das Lager sie nicht verbucht
+  (z. B. „unbekannt“), eine Regel angehalten wurde oder das Lager 3 Prüfungen
+  in Folge nicht erreichbar ist (und wenn es wieder da ist). Optional auch bei
+  jedem automatisch eingeplanten Druck. Jede Meldung kommt nur einmal, nicht
+  bei jeder Prüfung.
 - **Sicherung**: Meldet das Lager auf eine Buchung „unbekannt“ (die
   Druck-Zuordnung fehlt), hält die Regel an, damit nicht endlos nachgedruckt
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal
@@ -74,6 +82,8 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
    - Optional: Anthropic-API-Schlüssel eintragen und „KI-Einschätzung verwenden“
      einschalten. Ohne das gelten die festen Regeln, kostenlos.
    - Nachtruhe prüfen (Standard 22:00–07:00, 15 Minuten Puffer).
+   - Unter *Benachrichtigungen* die Kanäle auswählen, speichern und
+     „Testnachricht senden“.
    - **Speichern**, dann **Verbindung testen**.
 3. Unter **Regeln je Teil** für jedes Teil eine Regel anlegen. Beim Speichern
    legt Bambuddy im Lager die passende `druck_zuordnung` an.

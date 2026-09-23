@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,8 @@ from backend.app.services.lager_autodruck.nachtruhe import Nachtruhe
 logger = logging.getLogger(__name__)
 
 SCHLUESSEL = "lager_autodruck"
+# Welche Meldungen standardmaessig verschickt werden (siehe melden.EREIGNISSE).
+MELDEN_STANDARD = ("freigabe", "buchungsfehler", "angehalten", "lager_offline")
 GEHEIM = ("passwort", "anthropic_api_key")
 
 
@@ -48,6 +50,9 @@ class Konfig:
     schlafen: str = "22:00"
     aufstehen: str = "07:00"
     puffer_minuten: int = 15
+    # Benachrichtigungen: IDs von Bambuddy-Kanaelen und welche Meldungen.
+    melden_an: list[int] = field(default_factory=list)
+    melden: list[str] = field(default_factory=lambda: list(MELDEN_STANDARD))
 
     def nachtruhe(self) -> Nachtruhe | None:
         if not self.nachtruhe_aktiv:

@@ -121,3 +121,26 @@ async def test_konfig_lehnt_gefaehrliche_adresse_und_falsche_uhrzeit_ab(async_cl
     assert antwort.status_code == 400
     antwort = await async_client.put(f"{BASIS}/konfig", json={"schlafen": "25:00"})
     assert antwort.status_code == 400
+
+
+async def test_benachrichtigung_kanaele_und_test(async_client, db_session):
+    from unittest.mock import AsyncMock, patch
+
+    from backend.app.models.notification import NotificationProvider
+
+    kanal = NotificationProvider(name="Handy", provider_type="ntfy", config="{}", enabled=True)
+    db_session.add(kanal)
+    await db_session.commit()
+
+    daten = (await async_client.get(f"{BASIS}/benachrichtigung/kanaele")).json()
+    assert daten["kanaele"] == [{"id": kanal.id, "name": "Handy", "typ": "ntfy", "aktiv": True}]
+    assert {e["id"] for e in daten["ereignisse"]} >= {"freigabe", "lager_offline"}
+
+    assert (await async_client.post(f"{BASIS}/benachrichtigung/testen")).json()["ok"] is False
+    assert (await async_client.put(f"{BASIS}/konfig", json={"melden": ["quatsch"]})).status_code == 422
+    assert (await async_client.put(f"{BASIS}/konfig", json={"melden_an": [kanal.id]})).status_code == 200
+    with patch(
+        "backend.app.services.notification_service.notification_service._send_to_providers", AsyncMock()
+    ) as gesendet:
+        antwort = (await async_client.post(f"{BASIS}/benachrichtigung/testen")).json()
+    assert antwort["ok"] is True and gesendet.await_count == 1

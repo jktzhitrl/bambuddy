@@ -706,6 +706,8 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
         </CardContent>
       </Card>
 
+      <Benachrichtigungen k={k} setze={setze} darfAendern={darfAendern} />
+
       <Card>
         <CardHeader>
           <h2 className="text-white font-semibold">Verbindung zum Lager (Supabase)</h2>
@@ -774,5 +776,72 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
         </div>
       )}
     </div>
+  );
+}
+
+function Benachrichtigungen({ k, setze, darfAendern }: {
+  k: Konfig;
+  setze: <K extends keyof Konfig>(feld: K, wert: Konfig[K]) => void;
+  darfAendern: boolean;
+}) {
+  const { showToast } = useToast();
+  const daten = useQuery({ queryKey: ['lager-autodruck', 'benachrichtigung'], queryFn: lagerAutodruckApi.benachrichtigung });
+  const testen = useMutation({
+    mutationFn: lagerAutodruckApi.benachrichtigungTesten,
+    onSuccess: (e) => showToast(e.meldung, e.ok ? 'success' : 'warning'),
+    onError: (e: Error) => showToast(e.message, 'error'),
+  });
+  const umschalten = (liste: (string | number)[], wert: string | number) =>
+    liste.includes(wert) ? liste.filter(x => x !== wert) : [...liste, wert];
+
+  return (
+    <Card>
+      <CardHeader>
+        <h2 className="text-white font-semibold">Benachrichtigungen</h2>
+        <p className="text-xs text-bambu-gray mt-1">
+          Nutzt die Kanäle aus Bambuddy (ntfy, Telegram, E-Mail …), die du unter Einstellungen → Benachrichtigungen anlegst. Ruhezeiten der Kanäle gelten auch hier.
+          Den alten Webhook ans Lager hier nicht auswählen.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="text-sm text-white">An diese Kanäle senden</div>
+          {!daten.data?.kanaele.length && (
+            <div className="text-sm text-bambu-gray">Noch keine Kanäle angelegt – unter Einstellungen → Benachrichtigungen einen hinzufügen.</div>
+          )}
+          {daten.data?.kanaele.map(kanal => (
+            <label key={kanal.id} className="flex items-center gap-2 text-sm text-white">
+              <input
+                type="checkbox"
+                checked={k.melden_an.includes(kanal.id)}
+                disabled={!darfAendern}
+                onChange={() => setze('melden_an', umschalten(k.melden_an, kanal.id) as number[])}
+              />
+              {kanal.name} <span className="text-bambu-gray">({kanal.typ}{kanal.aktiv ? '' : ', ausgeschaltet'})</span>
+            </label>
+          ))}
+        </div>
+        <div className="space-y-2">
+          <div className="text-sm text-white">Bei diesen Ereignissen</div>
+          {daten.data?.ereignisse.map(ereignis => (
+            <label key={ereignis.id} className="flex items-center gap-2 text-sm text-white">
+              <input
+                type="checkbox"
+                checked={k.melden.includes(ereignis.id)}
+                disabled={!darfAendern}
+                onChange={() => setze('melden', umschalten(k.melden, ereignis.id) as string[])}
+              />
+              {ereignis.titel}
+            </label>
+          ))}
+        </div>
+        {darfAendern && (
+          <Button variant="secondary" size="sm" onClick={() => testen.mutate()} disabled={testen.isPending}>
+            {testen.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Testnachricht senden (vorher speichern)
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }

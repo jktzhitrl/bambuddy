@@ -49,7 +49,7 @@ from backend.app.models.lager_autodruck import (
 )
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lager_autodruck import bedarf, ki, konfig, nachtruhe
+from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import local_day_start, utcnow_naive
 
@@ -61,6 +61,11 @@ MAX_VERSUCHE = 20
 _RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
 # Antworten von druck_verbuchen, bei denen der Bestand im Lager wirklich stieg.
 BUCHUNG_OK = ("gebucht", "schon_gebucht")
+# Antworten, bei denen im Lager nichts mehr zu tun ist ("ignoriert" = Drucker
+# ist im Lager bewusst ausgeschlossen).
+BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert")
+# Nach so vielen Fehlschlaegen in Folge gibt es eine Benachrichtigung.
+MELDEN_NACH_VERSUCHEN = 3
 
 
 def dateiname_aus_druck(subtask_name: str | None, filename: str | None) -> str:
@@ -100,6 +105,10 @@ class LagerAutodruckService:
         # Frueheste Zeit, zu der ein startbereiter Druck wegen der Nachtruhe
         # zurueckgehalten werden muss - die Schleife wacht dann genau auf.
         self.naechste_grenze: datetime | None = None
+        # Damit dieselbe Meldung nicht bei jedem Durchlauf wiederkommt.
+        self._gemeldet_gesperrt: set[int] = set()
+        self._fehler_in_folge = 0
+        self._offline_gemeldet = False
 
     # --- Lebenszyklus -----------------------------------------------------
 
@@ -161,7 +170,7 @@ class LagerAutodruckService:
 
                 await self.jobs_abgleichen(db)
                 await self.nachtruhe_anwenden(db, k)
-                gesendet = await self.buchungen_senden(db, lager)
+                gesendet = await self.buchungen_senden(db, lager, k)
 
                 if not k.aktiv:
                     ergebnis = {"ergebnis": "Autodruck ausgeschaltet", "buchungen_gesendet": gesendet}
@@ -172,8 +181,10 @@ class LagerAutodruckService:
                         self.letzter_fehler = str(e)
                         self.letzter_lauf = utcnow_naive()
                         self.letztes_ergebnis = {"ergebnis": "Fehler", "meldung": str(e)}
+                        await self._lager_offline(db, k, str(e))
                         return self.letztes_ergebnis
                     ergebnis["buchungen_gesendet"] = gesendet
+                    await self._lager_wieder_da(db, k)
 
             self.letzter_lauf = utcnow_naive()
             self.letzter_fehler = None
@@ -269,6 +280,7 @@ class LagerAutodruckService:
                 eintrag.hinweis = gesperrt[regel.id]
             if eintrag.name and eintrag.name != regel.part_name:
                 regel.part_name = eintrag.name
+        await self._sperren_melden(db, k, gesperrt, regel_je_id)
         kandidaten = [
             c
             for c in kandidaten
@@ -297,6 +309,8 @@ class LagerAutodruckService:
 
         angelegt = 0
         wartet = 0
+        neu_wartend: list[str] = []
+        neu_automatisch: list[str] = []
         jetzt = utcnow_naive()
         for c, dringlichkeit, begruendung in bewertet:
             regel = regel_je_id[c.regel_id]
@@ -338,6 +352,8 @@ class LagerAutodruckService:
                 )
                 angelegt += 1
                 wartet += 0 if ohne_freigabe else 1
+            zeile = f"{c.druecke}× {c.name} ({c.stueck} Stück, Dringlichkeit {dringlichkeit})"
+            (neu_automatisch if ohne_freigabe else neu_wartend).append(zeile)
             logger.info(
                 "Lager-Autodruck: %s x '%s' eingeplant (%s, %s)",
                 c.druecke,
@@ -347,6 +363,22 @@ class LagerAutodruckService:
             )
         await db.commit()
         await self.nachtruhe_anwenden(db, k)
+        if neu_wartend:
+            await melden.senden(
+                db,
+                k,
+                "freigabe",
+                "Lager-Autodruck: Freigabe nötig",
+                "Diese Drucke warten in Bambuddy auf deine Freigabe:\n" + "\n".join(neu_wartend),
+            )
+        if neu_automatisch:
+            await melden.senden(
+                db,
+                k,
+                "eingeplant",
+                "Lager-Autodruck: Drucke eingeplant",
+                "Automatisch in die Warteschlange gestellt:\n" + "\n".join(neu_automatisch),
+            )
         return {"ergebnis": "ok", "angelegt": angelegt, "wartet_auf_freigabe": wartet, "regeln": len(regeln)}
 
     async def _in_warteschlange(
@@ -500,7 +532,7 @@ class LagerAutodruckService:
                 return
 
             if k.eingerichtet:
-                await self.buchungen_senden(db, self.lager_client(k))
+                await self.buchungen_senden(db, self.lager_client(k), k)
 
     async def _job_abschliessen(
         self,
@@ -572,11 +604,11 @@ class LagerAutodruckService:
             )
             await db.flush()
 
-    async def buchungen_senden(self, db: AsyncSession, lager: LagerClient) -> int:
+    async def buchungen_senden(self, db: AsyncSession, lager: LagerClient, k: konfig.Konfig) -> int:
         async with self._sende_lock:
-            return await self._buchungen_senden(db, lager)
+            return await self._buchungen_senden(db, lager, k)
 
-    async def _buchungen_senden(self, db: AsyncSession, lager: LagerClient) -> int:
+    async def _buchungen_senden(self, db: AsyncSession, lager: LagerClient, k: konfig.Konfig) -> int:
         offene = list(
             (
                 await db.execute(
@@ -605,6 +637,16 @@ class LagerAutodruckService:
                 buchung.fehler = str(e)[:1000]
                 logger.warning("Lager-Autodruck: Buchung %s nicht gesendet: %s", buchung.id, e)
                 await db.commit()
+                if buchung.versuche == MELDEN_NACH_VERSUCHEN:
+                    await melden.senden(
+                        db,
+                        k,
+                        "buchungsfehler",
+                        "Lager-Autodruck: Buchung hängt",
+                        f"Der Druck „{buchung.dateiname}“ ({buchung.drucker}) konnte nach "
+                        f"{buchung.versuche} Versuchen nicht ans Lager gemeldet werden: {e}\n"
+                        "Bambuddy versucht es weiter.",
+                    )
                 # Lager vermutlich nicht erreichbar - Rest beim naechsten Durchlauf.
                 break
             buchung.zustand = BUCHUNG_GESENDET
@@ -612,7 +654,58 @@ class LagerAutodruckService:
             buchung.gesendet_at = utcnow_naive()
             gesendet += 1
             await db.commit()
+            if buchung.ergebnis not in BUCHUNG_ANGEKOMMEN:
+                await melden.senden(
+                    db,
+                    k,
+                    "buchungsfehler",
+                    "Lager-Autodruck: Druck nicht verbucht",
+                    f"Das Lager hat den Druck „{buchung.dateiname}“ ({buchung.drucker}) nicht verbucht: "
+                    f"{buchung.ergebnis}. Bitte im Lager unter Druck-Eingang prüfen.",
+                )
         return gesendet
+
+    # --- Meldungen ---------------------------------------------------------------
+
+    async def _sperren_melden(
+        self, db: AsyncSession, k: konfig.Konfig, gesperrt: dict[int, str], regeln: dict[int, LagerDruckRegel]
+    ) -> None:
+        for regel_id in set(gesperrt) - self._gemeldet_gesperrt:
+            regel = regeln[regel_id]
+            await melden.senden(
+                db,
+                k,
+                "angehalten",
+                "Lager-Autodruck: Regel angehalten",
+                f"„{regel.part_name or regel.part_id}“: {gesperrt[regel_id]}",
+            )
+        self._gemeldet_gesperrt = set(gesperrt)
+
+    async def _lager_offline(self, db: AsyncSession, k: konfig.Konfig, fehler: str) -> None:
+        self._fehler_in_folge += 1
+        # Erst nach mehreren Fehlschlaegen melden - ein kurzer Aussetzer ist normal.
+        if self._fehler_in_folge == MELDEN_NACH_VERSUCHEN and not self._offline_gemeldet:
+            self._offline_gemeldet = True
+            await melden.senden(
+                db,
+                k,
+                "lager_offline",
+                "Lager-Autodruck: Lager nicht erreichbar",
+                f"Bambuddy erreicht das Lager seit {self._fehler_in_folge} Prüfungen nicht: {fehler}\n"
+                "Solange wird nichts Neues eingeplant.",
+            )
+
+    async def _lager_wieder_da(self, db: AsyncSession, k: konfig.Konfig) -> None:
+        if self._offline_gemeldet:
+            await melden.senden(
+                db,
+                k,
+                "lager_offline",
+                "Lager-Autodruck: Lager wieder erreichbar",
+                "Die Verbindung zum Lager steht wieder, der Autodruck läuft weiter.",
+            )
+        self._fehler_in_folge = 0
+        self._offline_gemeldet = False
 
 
 lager_autodruck_service = LagerAutodruckService()

@@ -300,6 +300,7 @@ async def init_db():
         github_backup,
         group,
         kprofile_note,
+        lager_autodruck,  # Fork: Lager-Autodruck
         library,
         local_preset,
         location,

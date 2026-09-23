@@ -89,6 +89,29 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
 
 ## Auf den Server bringen (bisher Docker mit offiziellem Image)
 
+### Schnell: mit dem Umstell-Skript
+
+Im Ordner der bisherigen Installation (dort, wo die `docker-compose.yml` liegt):
+
+```bash
+cd /pfad/zu/bambuddy
+curl -fsSL https://raw.githubusercontent.com/jktzhitrl/bambuddy/main/deploy/druckuebersicht-umstellen.sh -o druckuebersicht-umstellen.sh
+curl -fsSL https://raw.githubusercontent.com/jktzhitrl/bambuddy/main/deploy/druckuebersicht-zurueck.sh -o druckuebersicht-zurueck.sh
+bash druckuebersicht-umstellen.sh
+```
+
+Das Skript prüft Docker, `docker-compose.yml` und freien Speicher, baut das
+Image (Bambuddy läuft solange weiter), stoppt Bambuddy, sichert die Daten als
+`bambuddy-daten-<Datum>.tgz`, passt die `docker-compose.yml` an (Original:
+`docker-compose.yml.vorher`), startet und prüft, ob die Druckübersicht
+antwortet. Geht zwischendurch etwas schief, stellt es den vorherigen Zustand
+wieder her. Anderer Port als 8000: `PORT=1234 bash druckuebersicht-umstellen.sh`.
+
+Zurück zum Original: `bash druckuebersicht-zurueck.sh`.
+Spätere Updates: `bash druckuebersicht-umstellen.sh` einfach erneut ausführen.
+
+### Von Hand
+
 Das fertige Bambuddy-Image von GitHub (`ghcr.io/maziggy/bambuddy`) enthält
 diese Erweiterung **nicht** – das Image wird aus dem Fork selbst gebaut und in
 der **bestehenden** `docker-compose.yml` eingetragen.

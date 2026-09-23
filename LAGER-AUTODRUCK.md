@@ -142,9 +142,8 @@ anfangs am besten mit Modus „Immer freigeben“.
 
 ## Einrichten
 
-1. Diesen Fork statt des Original-Bambuddy installieren, z. B. per Docker mit
-   eigenem Build (`docker build -t bambuddy-lager .`). Die neuen Tabellen legt
-   Bambuddy beim Start selbst an.
+1. Diesen Fork statt des Original-Bambuddy installieren, wie oben unter
+   „Auf den Server bringen“ beschrieben.
 2. In Bambuddy links **Lager-Autodruck → Einstellungen** öffnen:
    - Supabase-Adresse, Anon-Schlüssel, E-Mail und Passwort des Drucker-Kontos
      eintragen. Das sind dieselben Werte wie bisher `DRUCK_SUPABASE_*` in Vercel.

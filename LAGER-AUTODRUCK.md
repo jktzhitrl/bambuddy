@@ -87,35 +87,61 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal
   speichern.
 
-## Auf den Server bringen
+## Auf den Server bringen (bisher Docker mit offiziellem Image)
 
-Wichtig: Das fertige Bambuddy-Image von GitHub (`ghcr.io/maziggy/bambuddy`)
-enthält den Autodruck **nicht**. Der Fork muss auf dem Server selbst gebaut
-werden. `docker-compose.yml` ist dafür schon angepasst (Image-Name
-`bambuddy-lager`).
+Das fertige Bambuddy-Image von GitHub (`ghcr.io/maziggy/bambuddy`) enthält
+diese Erweiterung **nicht** – das Image wird aus dem Fork selbst gebaut und in
+der **bestehenden** `docker-compose.yml` eingetragen.
 
-1. **Sichern** (Bambuddy vorher stoppen):
+> Nicht den Fork in einen neuen Ordner klonen und dort `docker compose up`
+> starten: Compose hängt den Ordnernamen vor die Volumes, Bambuddy bekäme ein
+> neues, leeres Daten-Volume.
+
+1. **In den bisherigen Ordner** (dort, wo die `docker-compose.yml` liegt) und
+   den Namen des Daten-Volumes herausfinden:
    ```bash
-   docker compose stop bambuddy
-   docker run --rm -v bambuddy_data:/data -v "$PWD":/backup alpine \
+   cd /pfad/zu/bambuddy
+   docker volume ls | grep bambuddy        # z. B. bambuddy_bambuddy_data
+   ```
+2. **Sichern** (Container dafür kurz stoppen, Volume-Namen aus Schritt 1):
+   ```bash
+   docker compose stop
+   docker run --rm -v bambuddy_bambuddy_data:/data -v "$PWD":/backup alpine \
      tar czf /backup/bambuddy-data-$(date +%F).tgz -C /data .
+   cp docker-compose.yml docker-compose.yml.vorher
    ```
-   Den Volume-Namen bei Bedarf mit `docker volume ls` prüfen. Bei eigenem
-   Pfad statt Volume einfach den Ordner kopieren.
-2. **Fork holen und bauen** (im Ordner mit der bisherigen `docker-compose.yml`
-   bzw. neu klonen und die eigene `docker-compose.yml`/`.env` übernehmen):
+3. **Image aus dem Fork bauen** (eigener Ordner nur für den Quellcode; dauert
+   beim ersten Mal einige Minuten, auf einem Raspberry Pi deutlich länger):
    ```bash
-   git clone -b claude/bumbuddy-program-rewrite-ychu7a https://github.com/jktzhitrl/bambuddy.git bambuddy-lager
-   cd bambuddy-lager
-   docker compose up -d --build
-   docker compose logs -f bambuddy     # auf Fehler achten (Dienstname bleibt "bambuddy")
+   git clone https://github.com/jktzhitrl/bambuddy.git ~/druckuebersicht-src
+   cd ~/druckuebersicht-src
+   docker build -t druckuebersicht:latest .
    ```
-   Der Bau dauert beim ersten Mal einige Minuten (Oberfläche wird gebaut).
-   Dasselbe Daten-Volume wird weiterverwendet; Bambuddy legt die neuen
-   Tabellen beim Start selbst an.
-3. **Zurück zur alten Version**, falls etwas nicht passt: im alten Ordner
-   `docker compose up -d` (offizielles Image). Die zusätzlichen Tabellen stören
-   das Original nicht. Notfalls das Backup aus Schritt 1 zurückspielen.
+4. **In der bisherigen `docker-compose.yml`** beim Dienst `bambuddy` die
+   Image-Zeile ändern und verhindern, dass das Original nachgeladen wird:
+   ```yaml
+       image: druckuebersicht:latest
+       pull_policy: never
+   ```
+   (Eine vorhandene Zeile `build: .` entfernen. Alles andere – Ports,
+   Volumes, Umgebungsvariablen, `network_mode` – bleibt, wie es ist.)
+5. **Starten und Log ansehen:**
+   ```bash
+   cd /pfad/zu/bambuddy
+   docker compose up -d
+   docker compose logs -f               # auf Fehler achten, Strg+C beendet
+   ```
+   Bambuddy legt die neuen Tabellen beim Start selbst an.
+6. **Zurück zum Original**, falls etwas nicht passt:
+   `cp docker-compose.yml.vorher docker-compose.yml && docker compose up -d`.
+   Die zusätzlichen Tabellen stören das Original nicht; notfalls das Backup
+   aus Schritt 2 zurückspielen.
+
+**Spätere Updates** (eigene Änderungen oder übernommene Bambuddy-Updates):
+```bash
+cd ~/druckuebersicht-src && git pull && docker build -t druckuebersicht:latest .
+cd /pfad/zu/bambuddy && docker compose up -d
+```
 
 Empfohlene Reihenfolge am ersten Abend: einrichten, Regeln anlegen, **Autodruck
 noch aus lassen** und „Jetzt prüfen“ drücken. Solange der Autodruck aus ist,
@@ -125,9 +151,8 @@ anfangs am besten mit Modus „Immer freigeben“.
 
 ## Einrichten
 
-1. Diesen Fork statt des Original-Bambuddy installieren, z. B. per Docker mit
-   eigenem Build (`docker build -t bambuddy-lager .`). Die neuen Tabellen legt
-   Bambuddy beim Start selbst an.
+1. Diesen Fork statt des Original-Bambuddy installieren, wie oben unter
+   „Auf den Server bringen“ beschrieben.
 2. In Bambuddy links **Lager-Autodruck → Einstellungen** öffnen:
    - Supabase-Adresse, Anon-Schlüssel, E-Mail und Passwort des Drucker-Kontos
      eintragen. Das sind dieselben Werte wie bisher `DRUCK_SUPABASE_*` in Vercel.

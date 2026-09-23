@@ -19,6 +19,8 @@
 #   QUELLE  Ordner fuer den Quellcode        (Standard: ~/druckuebersicht-src)
 #   ZWEIG   Git-Branch                        (Standard: main)
 #   PORT    Port von Bambuddy                 (Standard: 8000)
+#   ADRESSE IP, auf der Bambuddy lauscht      (Standard: localhost und die
+#           erste IP des Rechners werden probiert)
 #   JA=1    ohne Rueckfrage
 
 set -euo pipefail
@@ -28,6 +30,10 @@ IMAGE="druckuebersicht:latest"
 QUELLE="${QUELLE:-$HOME/druckuebersicht-src}"
 ZWEIG="${ZWEIG:-main}"
 PORT="${PORT:-8000}"
+# Bambuddy kann nur an eine bestimmte IP gebunden sein (ports: "IP:8000:8000"),
+# dann antwortet es nicht auf localhost - daher mehrere Adressen probieren.
+EIGENE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+ADRESSEN="${ADRESSE:-localhost ${EIGENE_IP}}"
 DIENST="bambuddy"
 COMPOSE_DATEI="docker-compose.yml"
 ZEIT="$(date +%Y-%m-%d_%H%M)"
@@ -156,13 +162,17 @@ gruen "$COMPOSE_DATEI angepasst (Original: $COMPOSE_DATEI.vorher)."
 schritt "4/4 Starten und pruefen"
 compose up -d "$DIENST"
 UMGESTELLT=1
-echo -n "Warte auf die Druckuebersicht auf Port $PORT "
+echo -n "Warte auf die Druckuebersicht (Port $PORT) "
 for _ in $(seq 1 60); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/api/v1/lager-autodruck/status" || true)"
+    code=""
+    for adresse in $ADRESSEN; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' "http://$adresse:$PORT/api/v1/lager-autodruck/status" || true)"
+        [[ "$code" == "000" || -z "$code" ]] || break
+    done
     # 200 = laeuft; 401 = laeuft mit Anmeldung. Beides heisst: neue Version aktiv.
     if [[ "$code" == "200" || "$code" == "401" ]]; then
         echo
-        gruen "Die Druckuebersicht laeuft: http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
+        gruen "Die Druckuebersicht laeuft: http://$adresse:$PORT"
         echo
         echo "Naechste Schritte: Lager-Autodruck -> Einstellungen (Supabase-Werte, Verbindung testen),"
         echo "Regeln anlegen, 'Jetzt pruefen' und die Vorschau ansehen. Autodruck erst danach einschalten."
@@ -177,8 +187,8 @@ for _ in $(seq 1 60); do
     sleep 3
 done
 echo
-gelb "Nach 3 Minuten keine Antwort auf Port $PORT."
+gelb "Nach 3 Minuten keine Antwort auf Port $PORT (probiert: $ADRESSEN)."
 gelb "Log ansehen: docker compose logs --tail 100 $DIENST"
-gelb "Anderer Port? Dann erneut pruefen mit: curl http://localhost:<PORT>/api/v1/lager-autodruck/status"
+gelb "Andere Adresse/Port? Pruefen mit: curl http://<IP>:<PORT>/api/v1/lager-autodruck/status"
 gelb "Zurueck zum Original: bash druckuebersicht-zurueck.sh"
 exit 1

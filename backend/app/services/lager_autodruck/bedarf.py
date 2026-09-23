@@ -69,28 +69,46 @@ class Uebersicht:
 
 
 def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
-    """Bedarf aus offenen Auftraegen; Sets werden in ihre Bestandteile zerlegt."""
+    """Bedarf aus offenen Auftraegen, heruntergebrochen auf druckbare Einzelteile.
+
+    Wie das Lager beim Abschliessen eines Auftrags: zuerst werden fertige Sets
+    vom Set-Bestand genommen, nur fuer den Rest werden Bestandteile gebraucht
+    (auch bei Sets in Sets). Ohne das wuerde fuer Sets, die schon fertig im
+    Regal liegen, trotzdem nachgedruckt.
+    """
     komponenten_je_set: dict[str, list[tuple[str, float]]] = {}
     for k in daten.get("komponenten", []):
         komponenten_je_set.setdefault(str(k.get("part_id")), []).append(
             (str(k.get("komponente_id")), zahl(k.get("menge")))
         )
+    set_bestand = {
+        str(t.get("id")): max(0.0, zahl(t.get("bestand")))
+        for t in daten.get("teile", [])
+        if str(t.get("id")) in komponenten_je_set
+    }
+
+    nachfrage: dict[str, float] = {}
+
+    def verteilen(teil: str, menge: float, pfad: tuple[str, ...]) -> None:
+        bestandteile = komponenten_je_set.get(teil)
+        if not bestandteile or teil in pfad:  # Einzelteil (oder Kreis - dann nicht weiter zerlegen)
+            nachfrage[teil] = nachfrage.get(teil, 0.0) + menge
+            return
+        vom_lager = min(menge, set_bestand.get(teil, 0.0))
+        set_bestand[teil] = set_bestand.get(teil, 0.0) - vom_lager
+        rest = menge - vom_lager
+        if rest <= 0:
+            return
+        for komponente, je_set in bestandteile:
+            verteilen(komponente, rest * je_set, pfad + (teil,))
 
     offene = {str(a.get("id")) for a in daten.get("auftraege", [])}
-    nachfrage: dict[str, float] = {}
     for pos in daten.get("positionen", []):
         if str(pos.get("order_id")) not in offene or not pos.get("part_id"):
             continue
         menge = zahl(pos.get("menge"))
-        if menge <= 0:
-            continue
-        teil = str(pos.get("part_id"))
-        bestandteile = komponenten_je_set.get(teil)
-        if bestandteile:
-            for komponente, je_set in bestandteile:
-                nachfrage[komponente] = nachfrage.get(komponente, 0.0) + menge * je_set
-        else:
-            nachfrage[teil] = nachfrage.get(teil, 0.0) + menge
+        if menge > 0:
+            verteilen(str(pos.get("part_id")), menge, ())
     return nachfrage
 
 

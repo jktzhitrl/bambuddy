@@ -88,6 +88,38 @@ def test_offene_auftraege_und_sets_erzeugen_bedarf():
     assert k.stueck == 6  # 2*2 - (-2)
 
 
+def test_fertige_sets_im_lager_decken_bedarf_zuerst():
+    daten = _daten(
+        teile=[
+            {"id": "a", "name": "A", "bestand": 0, "mindestbestand": 0},
+            {"id": "set", "name": "Set", "bestand": 3, "mindestbestand": 0},
+        ],
+        komponenten=[{"part_id": "set", "komponente_id": "a", "menge": 2}],
+        auftraege=[{"id": 1}, {"id": 2}],
+        positionen=[{"order_id": 1, "part_id": "set", "menge": 4}, {"order_id": 2, "part_id": "set", "menge": 1}],
+    )
+    # 5 Sets bestellt, 3 fertig im Regal -> nur 2 Sets aus Einzelteilen = 4x A
+    assert bedarf.nachfrage_je_teil(daten) == {"a": 4}
+
+
+def test_set_im_set():
+    daten = _daten(
+        teile=[
+            {"id": "gross", "name": "Gross", "bestand": 0},
+            {"id": "klein", "name": "Klein", "bestand": 1},
+            {"id": "a", "name": "A", "bestand": 0},
+        ],
+        komponenten=[
+            {"part_id": "gross", "komponente_id": "klein", "menge": 2},
+            {"part_id": "klein", "komponente_id": "a", "menge": 3},
+        ],
+        auftraege=[{"id": 1}],
+        positionen=[{"order_id": 1, "part_id": "gross", "menge": 1}],
+    )
+    # 1 Gross = 2 Klein, 1 Klein liegt da -> 1 Klein bauen = 3x A
+    assert bedarf.nachfrage_je_teil(daten) == {"a": 3}
+
+
 def test_regel_auf_set_wird_uebersprungen():
     daten = _daten(
         teile=[{"id": "set", "name": "Set", "bestand": 0, "mindestbestand": 5}],
@@ -675,3 +707,26 @@ async def test_schema_nachziehen_ergaenzt_fehlende_spalte(tmp_path):
         gemeldet = (await conn.execute(text("SELECT gemeldet_at FROM lager_druck_jobs"))).scalar()
     await alt.dispose()
     assert "gemeldet_at" in spalten and gemeldet is not None
+
+
+async def test_vorschau_bei_ausgeschaltetem_autodruck(umgebung, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    k = await konfig.laden(db_session)
+    k.aktiv = False
+    k.ki_verwenden, k.anthropic_api_key = True, "sk-test"
+    await konfig.speichern(db_session, k)
+    await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_FREIGABE, stueck_je_druck=2)
+    aufrufe = []
+
+    async def fake_ki(kandidaten, *, api_key, modell=None):
+        aufrufe.append(api_key)
+        return {}
+
+    with patch("backend.app.services.lager_autodruck.ki.einschaetzen", fake_ki):
+        ergebnis = await service.durchlauf()
+    assert ergebnis["wuerde_anlegen"] == 1
+    assert await _alle(sessions, PrintQueueItem) == [] and await _alle(sessions, LagerDruckJob) == []
+    (v,) = service.vorschau
+    assert (v["name"], v["druecke"], v["stueck"], v["ohne_freigabe"]) == ("Halter", 4, 8, False)
+    assert service.uebersicht[0]["bestand"] == 1
+    assert aufrufe == [None]  # Vorschau fragt die KI nicht (kostet nichts)

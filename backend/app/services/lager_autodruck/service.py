@@ -102,6 +102,8 @@ class LagerAutodruckService:
         self.letztes_ergebnis: dict | None = None
         self.letzter_fehler: str | None = None
         self.uebersicht: list[dict] = []
+        # Was bei ausgeschaltetem Autodruck eingeplant wuerde.
+        self.vorschau: list[dict] = []
         # Frueheste Zeit, zu der ein startbereiter Druck wegen der Nachtruhe
         # zurueckgehalten werden muss - die Schleife wacht dann genau auf.
         self.naechste_grenze: datetime | None = None
@@ -176,28 +178,32 @@ class LagerAutodruckService:
                 await self.nachtruhe_anwenden(db, k)
                 gesendet = await self.buchungen_senden(db, lager, k)
 
-                if not k.aktiv:
-                    ergebnis = {"ergebnis": "Autodruck ausgeschaltet", "buchungen_gesendet": gesendet}
-                    await self.auftraege_melden(db, k)
-                else:
-                    try:
-                        ergebnis = await self._planen(db, k, lager)
-                    except LagerFehler as e:
-                        self.letzter_fehler = str(e)
-                        self.letzter_lauf = utcnow_naive()
-                        self.letztes_ergebnis = {"ergebnis": "Fehler", "meldung": str(e)}
-                        await self._lager_offline(db, k, str(e))
-                        return self.letztes_ergebnis
-                    ergebnis["buchungen_gesendet"] = gesendet
-                    await self._lager_wieder_da(db, k)
-                    await self.auftraege_melden(db, k)
+                # Autodruck aus = Vorschau: gleiche Rechnung, aber nichts anlegen.
+                try:
+                    ergebnis = await self._planen(db, k, lager, vorschau=not k.aktiv)
+                except LagerFehler as e:
+                    self.letzter_fehler = str(e)
+                    self.letzter_lauf = utcnow_naive()
+                    self.letztes_ergebnis = {"ergebnis": "Fehler", "meldung": str(e)}
+                    await self._lager_offline(db, k, str(e))
+                    return self.letztes_ergebnis
+                ergebnis["buchungen_gesendet"] = gesendet
+                await self._lager_wieder_da(db, k)
+                await self.auftraege_melden(db, k)
 
             self.letzter_lauf = utcnow_naive()
             self.letzter_fehler = None
             self.letztes_ergebnis = ergebnis
             return ergebnis
 
-    async def _planen(self, db: AsyncSession, k: konfig.Konfig, lager: LagerClient) -> dict:
+    async def _planen(self, db: AsyncSession, k: konfig.Konfig, lager: LagerClient, *, vorschau: bool = False) -> dict:
+        """Bedarf rechnen und fehlende Drucke einplanen.
+
+        vorschau=True (Autodruck aus): alles rechnen, aber nichts in die
+        Warteschlange stellen - self.vorschau zeigt, was geplant wuerde. Die KI
+        wird dabei nicht gefragt (kostet nichts).
+        """
+        self.vorschau = []
         regeln = list((await db.execute(select(LagerDruckRegel))).scalars().all())
         if not regeln:
             self.uebersicht = []
@@ -301,7 +307,9 @@ class LagerAutodruckService:
             return {"ergebnis": "nichts zu drucken", "angelegt": 0, "regeln": len(regeln)}
 
         einschaetzung = await ki.einschaetzen(
-            kandidaten, api_key=k.anthropic_api_key if k.ki_verwenden else None, modell=k.ki_modell
+            kandidaten,
+            api_key=k.anthropic_api_key if k.ki_verwenden and not vorschau else None,
+            modell=k.ki_modell,
         )
         bewertet = []
         for c in kandidaten:
@@ -312,6 +320,26 @@ class LagerAutodruckService:
             bewertet.append((c, dringlichkeit, begruendung))
         # Dringendes zuerst anlegen, damit es auch zuerst in die Warteschlange kommt.
         bewertet.sort(key=lambda x: _RANG.get(x[1], 3))
+
+        if vorschau:
+            for c, dringlichkeit, begruendung in bewertet:
+                regel = regel_je_id[c.regel_id]
+                ohne_freigabe = regel.modus == MODUS_AUTOMATISCH or (
+                    regel.modus == MODUS_KI and dringlichkeit == "niedrig"
+                )
+                self.vorschau.append(
+                    {
+                        "part_id": c.part_id,
+                        "name": c.name,
+                        "druecke": c.druecke,
+                        "stueck": c.stueck,
+                        "dringlichkeit": dringlichkeit,
+                        "begruendung": begruendung,
+                        "ohne_freigabe": ohne_freigabe,
+                    }
+                )
+            await db.commit()
+            return {"ergebnis": "Vorschau (Autodruck aus)", "angelegt": 0, "wuerde_anlegen": len(self.vorschau)}
 
         angelegt = 0
         wartet = 0

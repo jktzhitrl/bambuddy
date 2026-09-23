@@ -77,6 +77,16 @@ export interface UebersichtZeile {
   hinweis: string | null;
 }
 
+export interface VorschauZeile {
+  part_id: string;
+  name: string;
+  druecke: number;
+  stueck: number;
+  dringlichkeit: string;
+  begruendung: string;
+  ohne_freigabe: boolean;
+}
+
 export interface Status {
   aktiv: boolean;
   eingerichtet: boolean;
@@ -86,6 +96,7 @@ export interface Status {
   letztes_ergebnis: Record<string, unknown> | null;
   letzter_fehler: string | null;
   uebersicht: UebersichtZeile[];
+  vorschau: VorschauZeile[];
   offene_buchungen: number;
 }
 

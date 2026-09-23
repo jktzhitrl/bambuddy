@@ -170,6 +170,32 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
         </CardContent>
       </Card>
 
+      {s?.eingerichtet && !s.aktiv && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-white font-semibold">Vorschau: das würde jetzt eingeplant</h2>
+            <p className="text-xs text-bambu-gray mt-1">
+              Der Autodruck ist aus – es wird nichts in die Warteschlange gestellt. So kannst du Regeln und Mindestbestände prüfen, bevor du ihn einschaltest.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {!s.vorschau.length && <p className="text-sm text-bambu-gray">Im Moment würde nichts gedruckt. („Jetzt prüfen“ rechnet neu.)</p>}
+            {s.vorschau.map(v => (
+              <div key={v.part_id} className="p-3 rounded-lg bg-bambu-dark text-sm space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white font-medium">{v.druecke} Druck{v.druecke === 1 ? '' : 'e'} {v.name} ({v.stueck} Stück)</span>
+                  <span className={`px-2 py-0.5 rounded text-xs ${DRINGLICHKEIT_FARBE[v.dringlichkeit] ?? ''}`}>{v.dringlichkeit}</span>
+                  <span className={v.ohne_freigabe ? 'text-blue-400' : 'text-yellow-400'}>
+                    {v.ohne_freigabe ? 'würde automatisch starten' : 'würde auf Freigabe warten'}
+                  </span>
+                </div>
+                <div className="text-bambu-gray">{v.begruendung}</div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {wartend.length > 0 && (
         <Card>
           <CardHeader><h2 className="text-white font-semibold">Wartet auf deine Freigabe ({wartend.length})</h2></CardHeader>

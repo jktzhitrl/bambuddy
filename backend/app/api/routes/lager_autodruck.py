@@ -413,6 +413,7 @@ async def status_lesen(
         "letztes_ergebnis": s.letztes_ergebnis,
         "letzter_fehler": s.letzter_fehler,
         "uebersicht": s.uebersicht,
+        "vorschau": s.vorschau if not k.aktiv else [],
         "offene_buchungen": offene_buchungen,
     }
 

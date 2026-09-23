@@ -20,8 +20,9 @@ Lager (Supabase) ◄── Bestand lesen / fertige Drucke verbuchen ──► Ba
 Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
 
 - **Bedarf**: Für jedes Teil mit Regel gilt
-  `verfügbar = Bestand + in Arbeit − Bedarf aus offenen Aufträgen` (Sets werden in
-  ihre Einzelteile zerlegt). Liegt das bei oder unter dem Mindestbestand, wird
+  `verfügbar = Bestand + in Arbeit − Bedarf aus offenen Aufträgen`. Bestellte
+  Sets werden wie im Lager beim Abschließen zuerst aus fertigen Sets gedeckt,
+  nur der Rest wird in Einzelteile zerlegt (auch Sets in Sets). Liegt das bei oder unter dem Mindestbestand, wird
   auf den doppelten Mindestbestand aufgefüllt, in ganzen Drucken.
   „In Arbeit“ sind Drucke, die in der Warteschlange stehen, gerade laufen oder
   fertig sind, deren Buchung aber noch nicht im Lager angekommen ist. So wird
@@ -52,6 +53,8 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   nicht mehr rechtzeitig fertig würde. Auch wenn ein Drucker erst spät frei
   wird, rutscht der Druck so nicht in die Nacht. Ein Druck, der über die
   Bambuddy-Warteschlange von Hand mit **Start** gestartet wird, läuft sofort.
+- **Vorschau**: Ist der Autodruck ausgeschaltet, wird trotzdem gerechnet und in
+  der Übersicht angezeigt, was jetzt eingeplant würde – ohne etwas anzulegen.
 - **Freigeben**: Aufträge, die eine Freigabe brauchen, stehen mit „manueller
   Start“ in der Bambuddy-Warteschlange. Freigeben geht über **Start** in der
   Warteschlange oder über **Freigeben** auf der Seite „Lager-Autodruck“.
@@ -74,6 +77,42 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   Druck-Zuordnung fehlt), hält die Regel an, damit nicht endlos nachgedruckt
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal
   speichern.
+
+## Auf den Server bringen
+
+Wichtig: Das fertige Bambuddy-Image von GitHub (`ghcr.io/maziggy/bambuddy`)
+enthält den Autodruck **nicht**. Der Fork muss auf dem Server selbst gebaut
+werden. `docker-compose.yml` ist dafür schon angepasst (Image-Name
+`bambuddy-lager`).
+
+1. **Sichern** (Bambuddy vorher stoppen):
+   ```bash
+   docker compose stop bambuddy
+   docker run --rm -v bambuddy_data:/data -v "$PWD":/backup alpine \
+     tar czf /backup/bambuddy-data-$(date +%F).tgz -C /data .
+   ```
+   Den Volume-Namen bei Bedarf mit `docker volume ls` prüfen. Bei eigenem
+   Pfad statt Volume einfach den Ordner kopieren.
+2. **Fork holen und bauen** (im Ordner mit der bisherigen `docker-compose.yml`
+   bzw. neu klonen und die eigene `docker-compose.yml`/`.env` übernehmen):
+   ```bash
+   git clone -b claude/bumbuddy-program-rewrite-ychu7a https://github.com/jktzhitrl/bambuddy.git bambuddy-lager
+   cd bambuddy-lager
+   docker compose up -d --build
+   docker compose logs -f bambuddy     # auf Fehler achten
+   ```
+   Der Bau dauert beim ersten Mal einige Minuten (Oberfläche wird gebaut).
+   Dasselbe Daten-Volume wird weiterverwendet; Bambuddy legt die neuen
+   Tabellen beim Start selbst an.
+3. **Zurück zur alten Version**, falls etwas nicht passt: im alten Ordner
+   `docker compose up -d` (offizielles Image). Die zusätzlichen Tabellen stören
+   das Original nicht. Notfalls das Backup aus Schritt 1 zurückspielen.
+
+Empfohlene Reihenfolge am ersten Abend: einrichten, Regeln anlegen, **Autodruck
+noch aus lassen** und „Jetzt prüfen“ drücken. Solange der Autodruck aus ist,
+zeigt die Übersicht eine **Vorschau**, was eingeplant würde – ohne etwas in die
+Warteschlange zu stellen und ohne KI-Kosten. Erst wenn das stimmt, einschalten –
+anfangs am besten mit Modus „Immer freigeben“.
 
 ## Einrichten
 

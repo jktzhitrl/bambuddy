@@ -1,4 +1,13 @@
-# Lager-Autodruck (Erweiterung in diesem Fork)
+# Druckübersicht – Bambuddy mit Lager-Autodruck
+
+Dieser Fork heißt in der Oberfläche **Druckübersicht** und trägt das Logo von
+B&E 3D Druck. Er basiert auf [Bambuddy](https://github.com/maziggy/bambuddy)
+von maziggy (Lizenz: AGPL-3.0, siehe `LICENSE`). Im Programmcode, in den
+Datenbank- und Ordnernamen heißt er weiter „bambuddy“, damit Updates vom
+Original ohne Konflikte übernommen werden können. Der Hinweis auf das Original
+(GitHub-Link unten in der Seitenleiste, Stream-Overlay) bleibt erhalten.
+
+## Lager-Autodruck
 
 Dieser Fork von [Bambuddy](https://github.com/maziggy/bambuddy) verbindet
 Bambuddy direkt mit dem Werkstattlager (Supabase). Bambuddy
@@ -99,7 +108,7 @@ werden. `docker-compose.yml` ist dafür schon angepasst (Image-Name
    git clone -b claude/bumbuddy-program-rewrite-ychu7a https://github.com/jktzhitrl/bambuddy.git bambuddy-lager
    cd bambuddy-lager
    docker compose up -d --build
-   docker compose logs -f bambuddy     # auf Fehler achten
+   docker compose logs -f bambuddy     # auf Fehler achten (Dienstname bleibt "bambuddy")
    ```
    Der Bau dauert beim ersten Mal einige Minuten (Oberfläche wird gebaut).
    Dasselbe Daten-Volume wird weiterverwendet; Bambuddy legt die neuen

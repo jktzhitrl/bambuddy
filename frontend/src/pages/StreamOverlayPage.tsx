@@ -278,7 +278,7 @@ export function StreamOverlayPage() {
   useEffect(() => {
     document.title = printer ? `${printer.name} - ${t('streamOverlay.title')}` : t('streamOverlay.title');
     return () => {
-      document.title = 'Bambuddy';
+      document.title = 'Druckübersicht';
     };
   }, [printer, t]);
 

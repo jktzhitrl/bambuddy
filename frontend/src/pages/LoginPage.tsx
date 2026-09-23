@@ -4,7 +4,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { X, Mail, Shield, Smartphone, Key } from 'lucide-react';
 import { api, type LoginResponse, type OIDCProvider, type TokenPersistence } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
@@ -115,7 +114,6 @@ export function LoginPage() {
   const { t } = useTranslation();
   const { login, loginWithToken, user, loading } = useAuth();
   const { showToast } = useToast();
-  const { mode } = useTheme();
 
   // Resolve the post-login destination, preferring router state (set by
   // ProtectedRoute when it redirects an unauthed visit) over the sessionStorage
@@ -705,11 +703,8 @@ export function LoginPage() {
       <div className="max-w-md w-full space-y-8 p-8 bg-gradient-to-br from-bambu-card to-bambu-dark-secondary rounded-xl border border-bambu-dark-tertiary shadow-lg">
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
-            <img
-              src={mode === 'dark' ? '/img/bambuddy_logo_dark_transparent.png' : '/img/bambuddy_logo_light.png'}
-              alt="Bambuddy"
-              className="h-16"
-            />
+            {/* Fork: eigenes Logo */}
+            <img src="/img/druckuebersicht_logo.png" alt="Druckübersicht" className="h-20 w-20 rounded-2xl" />
           </div>
           <h2 className="text-3xl font-bold text-white">
             {t('login.title')}

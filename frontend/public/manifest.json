@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Bambuddy",
-  "short_name": "Bambuddy",
-  "description": "Monitor and manage your Bambu Lab 3D printers",
+  "name": "Druckübersicht",
+  "short_name": "Druckübersicht",
+  "description": "Druckübersicht von B&E 3D Druck – basiert auf Bambuddy",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",

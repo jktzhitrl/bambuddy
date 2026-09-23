@@ -32,6 +32,9 @@ class Konfig:
     supabase_anon_key: str = ""
     email: str = ""
     passwort: str = ""
+    # KI-Einschaetzung kostet pro Aufruf Geld - deshalb eigener Schalter,
+    # standardmaessig aus. Aus = feste Regeln (bedarf.regel_dringlichkeit).
+    ki_verwenden: bool = False
     anthropic_api_key: str = ""
     ki_modell: str = STANDARD_MODELL
     intervall_minuten: int = 5

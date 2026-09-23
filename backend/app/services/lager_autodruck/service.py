@@ -304,7 +304,9 @@ class LagerAutodruckService:
             await db.commit()
             return {"ergebnis": "nichts zu drucken", "angelegt": 0, "regeln": len(regeln)}
 
-        einschaetzung = await ki.einschaetzen(kandidaten, api_key=k.anthropic_api_key, modell=k.ki_modell)
+        einschaetzung = await ki.einschaetzen(
+            kandidaten, api_key=k.anthropic_api_key if k.ki_verwenden else None, modell=k.ki_modell
+        )
         bewertet = []
         for c in kandidaten:
             dringlichkeit, begruendung = einschaetzung.get(c.part_id) or (

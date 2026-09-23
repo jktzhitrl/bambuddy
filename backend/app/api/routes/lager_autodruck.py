@@ -57,6 +57,7 @@ class KonfigDaten(BaseModel):
     email: str = ""
     # Leer oder Platzhalter = unveraendert lassen.
     passwort: str = ""
+    ki_verwenden: bool = False
     anthropic_api_key: str = ""
     ki_modell: str = ""
     intervall_minuten: int = Field(5, ge=1, le=1440)
@@ -95,6 +96,7 @@ async def konfig_speichern(
         anthropic_api_key=(
             alt.anthropic_api_key if daten.anthropic_api_key == _GEHEIM_PLATZHALTER else daten.anthropic_api_key.strip()
         ),
+        ki_verwenden=daten.ki_verwenden,
         ki_modell=daten.ki_modell.strip() or alt.ki_modell,
         intervall_minuten=daten.intervall_minuten,
         alle_drucke_verbuchen=daten.alle_drucke_verbuchen,
@@ -355,7 +357,7 @@ async def status_lesen(
     return {
         "aktiv": k.aktiv,
         "eingerichtet": k.eingerichtet,
-        "ki_aktiv": bool(k.anthropic_api_key),
+        "ki_aktiv": k.ki_verwenden and bool(k.anthropic_api_key),
         "intervall_minuten": k.intervall_minuten,
         "letzter_lauf": s.letzter_lauf.isoformat() + "Z" if s.letzter_lauf else None,
         "letztes_ergebnis": s.letztes_ergebnis,

@@ -36,6 +36,7 @@ export interface Konfig {
   supabase_anon_key: string;
   email: string;
   passwort: string;
+  ki_verwenden: boolean;
   anthropic_api_key: string;
   ki_modell: string;
   intervall_minuten: number;

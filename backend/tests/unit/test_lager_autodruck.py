@@ -295,6 +295,35 @@ async def test_modus_ki_ohne_schluessel_nutzt_feste_regel(umgebung):
     assert job.dringlichkeit == "niedrig" and job.status == JOB_GEPLANT
 
 
+async def test_ki_nur_mit_schalter(umgebung, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    await konfig.speichern(
+        db_session,
+        konfig.Konfig(
+            aktiv=True,
+            supabase_url="https://x",
+            supabase_anon_key="a",
+            email="e",
+            passwort="p",
+            anthropic_api_key="sk-test",
+            ki_verwenden=False,
+        ),
+    )
+    await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_KI, stueck_je_druck=10)
+    aufrufe = []
+
+    async def fake_ki(kandidaten, *, api_key, modell=None):
+        aufrufe.append(api_key)
+        return {}
+
+    with patch("backend.app.services.lager_autodruck.ki.einschaetzen", fake_ki):
+        await service.durchlauf()
+    # Schluessel hinterlegt, aber Schalter aus -> kein kostenpflichtiger Aufruf.
+    assert aufrufe == [None]
+    (job,) = await _alle(sessions, LagerDruckJob)
+    assert job.begruendung.startswith("Bestand")
+
+
 async def test_regel_aus_und_autodruck_aus(umgebung):
     service, lager, drucker, archiv, sessions = umgebung
     await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_AUS)

@@ -20,7 +20,7 @@ const EINGABE =
 
 const MODI: { wert: Modus; titel: string; text: string }[] = [
   { wert: 'automatisch', titel: 'Automatisch', text: 'Druckt ohne Nachfrage, sobald der Bestand zu niedrig ist.' },
-  { wert: 'ki', titel: 'KI entscheidet', text: 'Ohne Nachfrage nur bei niedriger Dringlichkeit, sonst erst freigeben.' },
+  { wert: 'ki', titel: 'Nach Dringlichkeit', text: 'Ohne Nachfrage nur bei niedriger Dringlichkeit, sonst erst freigeben. Dringlichkeit nach fester Regel oder per KI (Einstellungen).' },
   { wert: 'freigabe', titel: 'Immer freigeben', text: 'Plant den Druck ein, gestartet wird erst nach deiner Freigabe.' },
   { wert: 'aus', titel: 'Pausiert', text: 'Regel bleibt gespeichert, es wird nichts eingeplant.' },
 ];
@@ -144,7 +144,7 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
             {s && (
               <div className="text-bambu-gray">
                 Letzte Prüfung: {zeit(s.letzter_lauf)} · alle {s.intervall_minuten} Min.
-                {' · '}KI-Einschätzung {s.ki_aktiv ? 'an' : 'aus (feste Regeln)'}
+                {' · '}Dringlichkeit {s.ki_aktiv ? 'per KI' : 'nach fester Regel'}
                 {s.offene_buchungen > 0 && <> · <span className="text-yellow-400">{s.offene_buchungen} Buchung(en) noch nicht im Lager</span></>}
               </div>
             )}
@@ -694,19 +694,35 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
 
       <Card>
         <CardHeader>
-          <h2 className="text-white font-semibold">KI-Einschätzung (Claude)</h2>
+          <h2 className="text-white font-semibold">Dringlichkeit</h2>
           <p className="text-xs text-bambu-gray mt-1">
-            Bewertet, wie dringend ein Nachdruck ist. „hoch“ wird in der Warteschlange vorgezogen; im Modus „KI entscheidet“ druckt nur „niedrig“ ohne Freigabe.
-            Ohne Schlüssel gelten feste Regeln.
+            Jeder Nachdruck bekommt eine Dringlichkeit. „hoch“ wird in der Warteschlange vorgezogen; im Modus „Nach Dringlichkeit“ druckt nur „niedrig“ ohne Freigabe.
           </p>
         </CardHeader>
-        <CardContent className="grid md:grid-cols-2 gap-4">
+        <CardContent className="space-y-4">
+          <div className="text-sm text-bambu-gray space-y-1">
+            <div className="text-white">Feste Regel (kostenlos, gilt immer ohne KI):</div>
+            <div>• <span className="text-red-300">hoch</span>: Bestand 0 und offene Aufträge brauchen das Teil</div>
+            <div>• <span className="text-yellow-300">mittel</span>: verfügbar höchstens halber Mindestbestand</div>
+            <div>• <span className="text-bambu-green">niedrig</span>: alles andere</div>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-white font-medium">KI-Einschätzung verwenden (Claude)</div>
+              <div className="text-xs text-bambu-gray">
+                Statt der festen Regel bewertet Claude die Dringlichkeit und schreibt eine Begründung. Kostet bei jeder Prüfung, bei der etwas nachgedruckt werden muss, einen kleinen Betrag über deinen Anthropic-Schlüssel. Fällt die KI aus, gilt wieder die feste Regel.
+              </div>
+            </div>
+            <Toggle checked={k.ki_verwenden} onChange={v => setze('ki_verwenden', v)} disabled={!darfAendern} />
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
           <Feld titel="Anthropic-API-Schlüssel">
             <input type="password" className={EINGABE} value={k.anthropic_api_key} disabled={!darfAendern} onChange={e => setze('anthropic_api_key', e.target.value)} />
           </Feld>
           <Feld titel="Modell">
             <input className={EINGABE} value={k.ki_modell} disabled={!darfAendern} onChange={e => setze('ki_modell', e.target.value)} />
           </Feld>
+          </div>
         </CardContent>
       </Card>
 

@@ -26,12 +26,16 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   „In Arbeit“ sind Drucke, die in der Warteschlange stehen, gerade laufen oder
   fertig sind, deren Buchung aber noch nicht im Lager angekommen ist. So wird
   nichts doppelt gedruckt.
-- **KI-Einschätzung (Claude)**: Jeder Nachdruck bekommt die Dringlichkeit
-  niedrig, mittel oder hoch, mit Begründung. „hoch“ rückt in der Warteschlange
-  nach vorn. Ohne API-Schlüssel gelten feste Regeln.
+- **Dringlichkeit**: Jeder Nachdruck bekommt die Dringlichkeit niedrig, mittel
+  oder hoch. „hoch“ rückt in der Warteschlange nach vorn. Standardmäßig nach
+  fester, kostenloser Regel: *hoch* = Bestand 0 und offene Aufträge brauchen
+  das Teil, *mittel* = verfügbar höchstens halber Mindestbestand, sonst
+  *niedrig*. Optional (Schalter „KI-Einschätzung verwenden“, standardmäßig
+  aus) bewertet stattdessen Claude, mit Begründung; das kostet pro Aufruf
+  etwas über den eigenen Anthropic-Schlüssel.
 - **Regel je Teil**:
   - *Automatisch*: druckt ohne Nachfrage.
-  - *KI entscheidet*: ohne Nachfrage nur bei Dringlichkeit „niedrig“, sonst Freigabe.
+  - *Nach Dringlichkeit*: ohne Nachfrage nur bei Dringlichkeit „niedrig“, sonst Freigabe.
   - *Immer freigeben*: wartet immer auf Freigabe.
   - *Pausiert*: plant nichts ein.
 
@@ -59,7 +63,8 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
 2. In Bambuddy links **Lager-Autodruck → Einstellungen** öffnen:
    - Supabase-Adresse, Anon-Schlüssel, E-Mail und Passwort des Drucker-Kontos
      eintragen. Das sind dieselben Werte wie bisher `DRUCK_SUPABASE_*` in Vercel.
-   - Optional den Anthropic-API-Schlüssel für die KI-Einschätzung eintragen.
+   - Optional: Anthropic-API-Schlüssel eintragen und „KI-Einschätzung verwenden“
+     einschalten. Ohne das gelten die festen Regeln, kostenlos.
    - **Speichern**, dann **Verbindung testen**.
 3. Unter **Regeln je Teil** für jedes Teil eine Regel anlegen. Beim Speichern
    legt Bambuddy im Lager die passende `druck_zuordnung` an.

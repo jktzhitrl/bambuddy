@@ -94,6 +94,8 @@ class LagerDruckJob(Base):
     freigegeben_von: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Wann "wartet auf Freigabe"/"eingeplant" gemeldet wurde (None = noch offen).
+    gemeldet_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class LagerBuchung(Base):

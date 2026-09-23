@@ -128,6 +128,10 @@ class LagerAutodruckService:
         self._aufwecken.set()
 
     async def _schleife(self) -> None:
+        try:
+            await schema_nachziehen()
+        except Exception:  # noqa: BLE001
+            logger.exception("Lager-Autodruck: Tabellen konnten nicht aktualisiert werden")
         # Bambuddy erst in Ruhe hochfahren lassen.
         await asyncio.sleep(30)
         while True:
@@ -174,6 +178,7 @@ class LagerAutodruckService:
 
                 if not k.aktiv:
                     ergebnis = {"ergebnis": "Autodruck ausgeschaltet", "buchungen_gesendet": gesendet}
+                    await self.auftraege_melden(db, k)
                 else:
                     try:
                         ergebnis = await self._planen(db, k, lager)
@@ -185,6 +190,7 @@ class LagerAutodruckService:
                         return self.letztes_ergebnis
                     ergebnis["buchungen_gesendet"] = gesendet
                     await self._lager_wieder_da(db, k)
+                    await self.auftraege_melden(db, k)
 
             self.letzter_lauf = utcnow_naive()
             self.letzter_fehler = None
@@ -309,8 +315,6 @@ class LagerAutodruckService:
 
         angelegt = 0
         wartet = 0
-        neu_wartend: list[str] = []
-        neu_automatisch: list[str] = []
         jetzt = utcnow_naive()
         for c, dringlichkeit, begruendung in bewertet:
             regel = regel_je_id[c.regel_id]
@@ -352,8 +356,6 @@ class LagerAutodruckService:
                 )
                 angelegt += 1
                 wartet += 0 if ohne_freigabe else 1
-            zeile = f"{c.druecke}× {c.name} ({c.stueck} Stück, Dringlichkeit {dringlichkeit})"
-            (neu_automatisch if ohne_freigabe else neu_wartend).append(zeile)
             logger.info(
                 "Lager-Autodruck: %s x '%s' eingeplant (%s, %s)",
                 c.druecke,
@@ -363,22 +365,6 @@ class LagerAutodruckService:
             )
         await db.commit()
         await self.nachtruhe_anwenden(db, k)
-        if neu_wartend:
-            await melden.senden(
-                db,
-                k,
-                "freigabe",
-                "Lager-Autodruck: Freigabe nötig",
-                "Diese Drucke warten in Bambuddy auf deine Freigabe:\n" + "\n".join(neu_wartend),
-            )
-        if neu_automatisch:
-            await melden.senden(
-                db,
-                k,
-                "eingeplant",
-                "Lager-Autodruck: Drucke eingeplant",
-                "Automatisch in die Warteschlange gestellt:\n" + "\n".join(neu_automatisch),
-            )
         return {"ergebnis": "ok", "angelegt": angelegt, "wartet_auf_freigabe": wartet, "regeln": len(regeln)}
 
     async def _in_warteschlange(
@@ -667,6 +653,51 @@ class LagerAutodruckService:
 
     # --- Meldungen ---------------------------------------------------------------
 
+    async def auftraege_melden(self, db: AsyncSession, k: konfig.Konfig) -> None:
+        """Neue Auftraege melden: "wartet auf Freigabe" und "automatisch eingeplant".
+
+        Zwischen "Fertig spaetestens" und "Fertig fruehestens" (der Nacht) wird
+        nur gesammelt und zur Fertig-fruehestens-Zeit auf einmal geschickt.
+        Jeder Auftrag wird genau einmal gemeldet (gemeldet_at), auch ueber einen
+        Neustart hinweg. Fehler-Meldungen laufen nicht hierueber, die kommen sofort.
+        """
+        ruhe = k.nachtruhe()
+        if ruhe is not None and nachtruhe.ist_nacht(ruhe, utcnow_naive()):
+            return
+        jobs = list(
+            (
+                await db.execute(
+                    select(LagerDruckJob).where(LagerDruckJob.gemeldet_at.is_(None)).order_by(LagerDruckJob.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not jobs:
+            return
+        wartend = [j for j in jobs if j.status == JOB_WARTET]
+        automatisch = [j for j in jobs if j.freigegeben_von == "automatisch" and j.status != JOB_VERWORFEN]
+        jetzt = utcnow_naive()
+        for j in jobs:
+            j.gemeldet_at = jetzt
+        await db.commit()
+        if wartend:
+            await melden.senden(
+                db,
+                k,
+                "freigabe",
+                "Lager-Autodruck: Freigabe nötig",
+                "Diese Drucke warten in Bambuddy auf deine Freigabe:\n" + _auftragsliste(wartend),
+            )
+        if automatisch:
+            await melden.senden(
+                db,
+                k,
+                "eingeplant",
+                "Lager-Autodruck: Drucke eingeplant",
+                "Automatisch in die Warteschlange gestellt:\n" + _auftragsliste(automatisch),
+            )
+
     async def _sperren_melden(
         self, db: AsyncSession, k: konfig.Konfig, gesperrt: dict[int, str], regeln: dict[int, LagerDruckRegel]
     ) -> None:
@@ -706,6 +737,35 @@ class LagerAutodruckService:
             )
         self._fehler_in_folge = 0
         self._offline_gemeldet = False
+
+
+def _auftragsliste(jobs: list[LagerDruckJob]) -> str:
+    """Gleiche Teile zusammenfassen: "2 Drucke Halter (8 Stück, hoch)"."""
+    gruppen: dict[tuple[str, str | None], list[LagerDruckJob]] = {}
+    for j in jobs:
+        gruppen.setdefault((j.part_name or j.part_id, j.dringlichkeit), []).append(j)
+    zeilen = []
+    for (name, dringlichkeit), gruppe in gruppen.items():
+        drucke = f"{len(gruppe)} Drucke" if len(gruppe) > 1 else "1 Druck"
+        stueck = sum(j.stueck for j in gruppe)
+        zeilen.append(f"• {drucke} {name} ({stueck} Stück{', ' + dringlichkeit if dringlichkeit else ''})")
+    return "\n".join(zeilen)
+
+
+async def schema_nachziehen() -> None:
+    """Spalten nachtragen, die nach dem ersten Anlegen der Tabellen dazukamen.
+
+    create_all() legt nur fehlende Tabellen an, keine Spalten in bestehenden.
+    """
+    from sqlalchemy import inspect, text
+
+    async with database.engine.begin() as conn:
+        spalten = await conn.run_sync(lambda c: {s["name"] for s in inspect(c).get_columns("lager_druck_jobs")})
+        if "gemeldet_at" not in spalten:
+            await conn.execute(text("ALTER TABLE lager_druck_jobs ADD COLUMN gemeldet_at TIMESTAMP"))
+            # Bestehende Auftraege gelten als gemeldet - sonst kaeme eine Flut.
+            await conn.execute(text("UPDATE lager_druck_jobs SET gemeldet_at = created_at"))
+            logger.info("Lager-Autodruck: Spalte lager_druck_jobs.gemeldet_at nachgetragen")
 
 
 lager_autodruck_service = LagerAutodruckService()

@@ -624,3 +624,54 @@ async def test_meldung_lager_offline_und_wieder_da(umgebung, gemeldet, monkeypat
     monkeypatch.setattr(lager, "lade_bestandsdaten", original)
     await service.durchlauf()
     assert gemeldet[-1][1] == "Lager-Autodruck: Lager wieder erreichbar"
+
+
+async def test_freigabe_meldung_nachts_gesammelt_und_morgens_geschickt(umgebung, gemeldet, db_session, utc):
+    service, lager, drucker, archiv, sessions = umgebung
+    k = await konfig.laden(db_session)
+    k.nachtruhe_aktiv, k.schlafen, k.aufstehen, k.puffer_minuten = True, "22:00", "07:00", 0
+    await konfig.speichern(db_session, k)
+    await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_FREIGABE, stueck_je_druck=2)
+    zeit = "backend.app.services.lager_autodruck.service.utcnow_naive"
+
+    with patch(zeit, return_value=datetime(2026, 9, 23, 23, 0)):
+        await service.durchlauf()
+    assert len(await _alle(sessions, LagerDruckJob)) == 4
+    assert gemeldet == []  # nachts nichts
+
+    with patch(zeit, return_value=datetime(2026, 9, 24, 7, 5)):
+        await service.durchlauf()
+    ((ereignis, titel, text, _),) = gemeldet
+    assert ereignis == "lager_autodruck_freigabe"
+    assert "4 Drucke Halter (8 Stück" in text  # zusammengefasst
+
+    with patch(zeit, return_value=datetime(2026, 9, 24, 8, 0)):
+        await service.durchlauf()
+    assert len(gemeldet) == 1  # nur einmal
+
+
+async def test_schema_nachziehen_ist_harmlos(test_engine):
+    from backend.app.services.lager_autodruck.service import schema_nachziehen
+
+    with patch("backend.app.core.database.engine", test_engine):
+        await schema_nachziehen()
+        await schema_nachziehen()
+
+
+async def test_schema_nachziehen_ergaenzt_fehlende_spalte(tmp_path):
+    from sqlalchemy import inspect, text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from backend.app.services.lager_autodruck.service import schema_nachziehen
+
+    alt = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'alt.db'}")
+    async with alt.begin() as conn:
+        await conn.execute(text("CREATE TABLE lager_druck_jobs (id INTEGER PRIMARY KEY, created_at TIMESTAMP)"))
+        await conn.execute(text("INSERT INTO lager_druck_jobs (id, created_at) VALUES (1, '2026-09-23 10:00:00')"))
+    with patch("backend.app.core.database.engine", alt):
+        await schema_nachziehen()
+    async with alt.connect() as conn:
+        spalten = await conn.run_sync(lambda c: {s["name"] for s in inspect(c).get_columns("lager_druck_jobs")})
+        gemeldet = (await conn.execute(text("SELECT gemeldet_at FROM lager_druck_jobs"))).scalar()
+    await alt.dispose()
+    assert "gemeldet_at" in spalten and gemeldet is not None

@@ -1,4 +1,6 @@
-"""Nachtruhe: kein Druck soll fertig werden, waehrend man schlaeft.
+"""Druckende optimieren ("Nachtruhe"): kein Druck soll fertig werden, waehrend
+man schlaeft. Es wird nichts gesperrt - gedruckt wird rund um die Uhr, nur der
+Start wird so gelegt, dass das Ende passt.
 
 Ein Druck darf starten, wenn sein Ende (Start + Druckdauer + Puffer) nicht in
 die Nacht faellt - also vor dem Schlafengehen oder nach dem Aufstehen. Wuerde
@@ -84,3 +86,9 @@ def naechste_grenze(ruhe: Nachtruhe, jetzt: datetime, dauer: timedelta) -> datet
     if not kommende:
         return None
     return _utc_naiv(min(kommende) - gesamt)
+
+
+def ist_nacht(ruhe: Nachtruhe, jetzt: datetime) -> bool:
+    """Liegt *jetzt* zwischen "Fertig spaetestens" und "Fertig fruehestens"?"""
+    lokal = _lokal(jetzt)
+    return any(beginn < lokal < ende for beginn, ende in _naechte(ruhe, lokal, lokal))

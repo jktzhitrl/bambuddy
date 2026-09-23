@@ -42,10 +42,12 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   Dazu gehören pro Regel: die Druckdatei aus dem Archiv, Stück pro Druck, ein
   fester Drucker oder „irgendein freier Drucker vom Modell X“ (optional
   Standort) und höchstens N Drucke pro Tag.
-- **Nachtruhe** (Einstellungen, gilt für alle Regeln): Kein automatischer Druck
-  soll zwischen Schlafengehen und Aufstehen fertig werden. Aus der Druckdauer
-  laut Druckdatei plus Puffer wird das Ende berechnet. Fiele es in die Nacht,
-  startet der Druck später, sodass er genau zur Aufstehzeit fertig ist.
+- **Druckende optimieren** (Einstellungen, gilt für alle Regeln): Gedruckt wird
+  rund um die Uhr, es wird nichts gesperrt. Nur der Start wird so gelegt, dass
+  kein automatischer Druck zwischen „Fertig spätestens um“ (z. B. Schlafengehen)
+  und „Fertig frühestens um“ (z. B. Aufstehen) fertig wird. Aus der Druckdauer
+  laut Druckdatei plus Puffer wird das Ende berechnet. Fiele es dazwischen,
+  startet der Druck später, sodass er genau zur „Fertig frühestens“-Zeit fertig ist.
   Geprüft wird laufend und genau zu dem Zeitpunkt, ab dem ein wartender Druck
   nicht mehr rechtzeitig fertig würde. Auch wenn ein Drucker erst spät frei
   wird, rutscht der Druck so nicht in die Nacht. Ein Druck, der über die
@@ -65,7 +67,9 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   (z. B. „unbekannt“), eine Regel angehalten wurde oder das Lager 3 Prüfungen
   in Folge nicht erreichbar ist (und wenn es wieder da ist). Optional auch bei
   jedem automatisch eingeplanten Druck. Jede Meldung kommt nur einmal, nicht
-  bei jeder Prüfung.
+  bei jeder Prüfung. „Wartet auf Freigabe“ und „eingeplant“ aus der Nacht
+  (zwischen den beiden Zeiten von „Druckende optimieren“) kommen gesammelt zur
+  „Fertig frühestens“-Zeit; Fehlermeldungen kommen sofort.
 - **Sicherung**: Meldet das Lager auf eine Buchung „unbekannt“ (die
   Druck-Zuordnung fehlt), hält die Regel an, damit nicht endlos nachgedruckt
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal
@@ -81,7 +85,8 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
      eintragen. Das sind dieselben Werte wie bisher `DRUCK_SUPABASE_*` in Vercel.
    - Optional: Anthropic-API-Schlüssel eintragen und „KI-Einschätzung verwenden“
      einschalten. Ohne das gelten die festen Regeln, kostenlos.
-   - Nachtruhe prüfen (Standard 22:00–07:00, 15 Minuten Puffer).
+   - „Druckende optimieren“ prüfen (Standard: fertig spätestens 22:00, frühestens
+     07:00, 15 Minuten Puffer).
    - Unter *Benachrichtigungen* die Kanäle auswählen, speichern und
      „Testnachricht senden“.
    - **Speichern**, dann **Verbindung testen**.

@@ -125,7 +125,7 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
     mutationFn: lagerAutodruckApi.jobFreigeben,
     onSuccess: (e) => {
       showToast(e.geplanter_start
-        ? `Freigegeben - wegen Nachtruhe Start frühestens ${zeit(e.geplanter_start)}`
+        ? `Freigegeben - Start ${zeit(e.geplanter_start)}, damit das Druckende passt`
         : 'Freigegeben - startet, sobald ein Drucker frei ist');
       neuLaden();
     },
@@ -266,7 +266,7 @@ function JobBeschreibung({ job }: { job: Job }) {
       </div>
       {job.geplanter_start && new Date(job.geplanter_start) > new Date() && ['geplant', 'wartet_auf_freigabe'].includes(job.status) && (
         <div className="text-xs text-blue-300">
-          Nachtruhe: startet frühestens {zeit(job.geplanter_start)}, damit er nicht in der Nacht fertig wird
+          Druckende optimiert: startet {zeit(job.geplanter_start)}, damit er nicht in der Nacht fertig wird
         </div>
       )}
     </div>
@@ -530,7 +530,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          <Feld titel="Höchstens Drucke pro Tag" hilfe="Leer = kein Limit. Wann gestartet wird, regelt die Nachtruhe in den Einstellungen.">
+          <Feld titel="Höchstens Drucke pro Tag" hilfe="Leer = kein Limit. Wann gestartet wird, regelt „Druckende optimieren“ in den Einstellungen.">
             <input type="number" min={0} className={EINGABE} value={r.max_drucke_pro_tag ?? ''} onChange={e => setze('max_drucke_pro_tag', e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} />
           </Feld>
           {gewaehltesArchiv?.druckzeit_s ? (
@@ -681,22 +681,23 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
 
       <Card>
         <CardHeader>
-          <h2 className="text-white font-semibold">Nachtruhe</h2>
+          <h2 className="text-white font-semibold">Druckende optimieren</h2>
           <p className="text-xs text-bambu-gray mt-1">
-            Automatische Drucke werden so gestartet, dass sie vor dem Schlafengehen oder nach dem Aufstehen fertig sind – nie mitten in der Nacht.
-            Würde ein Druck in der Nacht fertig, startet er später, sodass er zur Aufstehzeit fertig ist. Die Druckdauer kommt aus der Druckdatei.
+            Gedruckt wird rund um die Uhr – es wird nichts gesperrt. Nur der Start wird so gelegt, dass ein Druck nicht zwischen den beiden Zeiten fertig wird.
+            Würde er dort fertig, startet er später und ist genau zur „Fertig frühestens“-Zeit fertig. Die Druckdauer kommt aus der Druckdatei.
+            Meldungen „wartet auf Freigabe“ und „eingeplant“ aus dieser Zeit kommen gesammelt zur „Fertig frühestens“-Zeit.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4">
-            <div className="text-white font-medium">Nachtruhe beachten</div>
+            <div className="text-white font-medium">Druckende optimieren</div>
             <Toggle checked={k.nachtruhe_aktiv} onChange={v => setze('nachtruhe_aktiv', v)} disabled={!darfAendern} />
           </div>
           <div className="grid md:grid-cols-3 gap-4">
-            <Feld titel="Schlafen gehen">
+            <Feld titel="Fertig spätestens um" hilfe="z. B. wann du schlafen gehst">
               <input type="time" className={EINGABE} value={k.schlafen} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('schlafen', e.target.value)} />
             </Feld>
-            <Feld titel="Aufstehen">
+            <Feld titel="Fertig frühestens um" hilfe="z. B. wann du aufstehst">
               <input type="time" className={EINGABE} value={k.aufstehen} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('aufstehen', e.target.value)} />
             </Feld>
             <Feld titel="Puffer (Minuten)" hilfe="Für Aufheizen und falls der Druck länger dauert als geschätzt">
@@ -799,7 +800,7 @@ function Benachrichtigungen({ k, setze, darfAendern }: {
       <CardHeader>
         <h2 className="text-white font-semibold">Benachrichtigungen</h2>
         <p className="text-xs text-bambu-gray mt-1">
-          Nutzt die Kanäle aus Bambuddy (ntfy, Telegram, E-Mail …), die du unter Einstellungen → Benachrichtigungen anlegst. Ruhezeiten der Kanäle gelten auch hier.
+          Nutzt die Kanäle aus Bambuddy (ntfy, Telegram, E-Mail …), die du unter Einstellungen → Benachrichtigungen anlegst.
           Den alten Webhook ans Lager hier nicht auswählen.
         </p>
       </CardHeader>

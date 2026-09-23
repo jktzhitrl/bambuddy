@@ -1,11 +1,14 @@
 services:
   bambuddy:
-    image: ghcr.io/maziggy/bambuddy:latest
+    # Fork: Lager-Autodruck - eigener Image-Name, damit "docker compose pull"
+    # nicht das Original-Bambuddy ueber diese Version legt. Immer mit
+    # "docker compose up -d --build" starten/aktualisieren.
+    image: bambuddy-lager:latest
     build: .
     # Usage:
     #   docker compose up -d          → pulls pre-built image from ghcr.io
     #   docker compose up -d --build  → builds locally from source
-    container_name: bambuddy
+    container_name: druckuebersicht  # Fork: eigener Name
     # File ownership inside the data and logs volumes is normalised by the
     # entrypoint at startup (chowns to PUID:PGID and drops privileges via
     # gosu before running the app). Override PUID / PGID below to match

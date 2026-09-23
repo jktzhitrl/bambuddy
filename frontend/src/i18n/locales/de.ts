@@ -29,7 +29,7 @@ export default {
     smartSwitches: 'Smart Switches',
     logout: 'Abmelden',
     installApp: 'App installieren',
-    installAppSuccess: 'Bambuddy wurde installiert',
+    installAppSuccess: 'Druckübersicht wurde installiert',
   },
 
   // Common
@@ -378,7 +378,7 @@ export default {
       confirmMidPrintTitle: 'Wartungsmodus während des Drucks aktivieren?',
       confirmMidPrintMessage: '{{name}} druckt gerade. Der Wartungsmodus trennt die MQTT-Verbindung und beendet das Fortschritts-Tracking sowie Abschlussbenachrichtigungen für diesen Auftrag. Fortfahren?',
       editFieldLabel: 'Wartungsmodus',
-      editFieldHelp: 'Wenn aktiviert, ist dieser Drucker von MQTT, Warteschlangenversand und Benachrichtigungen pausiert — nützlich für Reparaturen, parallele Bambuddy-Installationen oder temporäre Außerbetriebnahme.',
+      editFieldHelp: 'Wenn aktiviert, ist dieser Drucker von MQTT, Warteschlangenversand und Benachrichtigungen pausiert — nützlich für Reparaturen, parallele Druckübersicht-Installationen oder temporäre Außerbetriebnahme.',
     },
     // Chamber light
     chamberLightOn: 'Kammerbeleuchtung einschalten',
@@ -897,15 +897,15 @@ export default {
     title: 'Druckarchiv',
     no3mfBanner: {
       title: 'Einige kürzliche Drucke konnten nicht mit Vorschaubild archiviert werden',
-      body: 'Der Slicer hat die .gcode.3mf-Datei nicht auf der SD-Karte des Druckers hinterlegt, daher konnte Bambuddy weder Vorschaubild noch Slicer-Metadaten abrufen. Üblicherweise liegt das daran, dass "Gesendete Dateien auf externem Speicher speichern" im Slicer (Geräte-Tab in Bambu Studio / OrcaSlicer) deaktiviert ist.',
+      body: 'Der Slicer hat die .gcode.3mf-Datei nicht auf der SD-Karte des Druckers hinterlegt, daher konnte Druckübersicht weder Vorschaubild noch Slicer-Metadaten abrufen. Üblicherweise liegt das daran, dass "Gesendete Dateien auf externem Speicher speichern" im Slicer (Geräte-Tab in Bambu Studio / OrcaSlicer) deaktiviert ist.',
       docsLink: 'Installationsschritt 4 anzeigen',
       docsLinkInternalStorage: 'Warum das passiert',
       titleInternalStorage: 'Einige kürzliche Drucke blieben im internen Speicher des Druckers',
-      bodyInternalStorage: 'Bambu Studio hat die geslicte Datei im internen Speicher des Druckers statt auf der Karte abgelegt, daher gab es für Bambuddy nichts über FTP zu lesen. Bei der H2-Serie und dem P2S macht die Schaltfläche "Drucken" das immer — nur "Senden" bietet eine Auswahl, und auch die steht standardmäßig auf "Cache". Diese Drucke werden weiterhin mit Namen und Zeiten archiviert, nur ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive den Druck aus Bambuddy starten oder in OrcaSlicer slicen — oder in Bambu Studio "Senden" mit "Extern" verwenden und den Druck danach starten. Alle setzen eine Karte oder einen Stick im Drucker voraus.',
+      bodyInternalStorage: 'Bambu Studio hat die geslicte Datei im internen Speicher des Druckers statt auf der Karte abgelegt, daher gab es für Druckübersicht nichts über FTP zu lesen. Bei der H2-Serie und dem P2S macht die Schaltfläche "Drucken" das immer — nur "Senden" bietet eine Auswahl, und auch die steht standardmäßig auf "Cache". Diese Drucke werden weiterhin mit Namen und Zeiten archiviert, nur ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive den Druck aus Druckübersicht starten oder in OrcaSlicer slicen — oder in Bambu Studio "Senden" mit "Extern" verwenden und den Druck danach starten. Alle setzen eine Karte oder einen Stick im Drucker voraus.',
       titleNoExternalStorage: 'Einige kürzliche Drucke konnten nicht archiviert werden — kein Speicher im Drucker',
-      bodyNoExternalStorage: 'Der Drucker meldet weder Karte noch Stick im Steckplatz, daher hatte die geslicte Datei keinen Ablageort und Bambuddy nichts zu lesen. Legen Sie einen ein, dann wird der nächste Druck vollständig archiviert.',
+      bodyNoExternalStorage: 'Der Drucker meldet weder Karte noch Stick im Steckplatz, daher hatte die geslicte Datei keinen Ablageort und Druckübersicht nichts zu lesen. Legen Sie einen ein, dann wird der nächste Druck vollständig archiviert.',
       titleInternalHistory: 'Einige kürzliche Drucke wurden aus einer Datei gestartet, die bereits auf dem Drucker lag',
-      bodyInternalHistory: 'Diese Drucke liefen aus der eigenen Bibliothek des Druckers — ein erneuter Druck über sein Display, ein Start aus Handy oder eine früher gesendete und später gedruckte Datei. Bambuddy liest Druckdateien über FTP, und das bedient nur Karte oder Stick, während der Drucker diese Bibliothek in einem Bereich ablegt, den FTP nicht erreicht — es gab also keine 3MF zu lesen. Keine Slicer-Einstellung ändert das, denn für diese Drucke wurde nichts gesendet. Sie werden weiterhin mit Namen und Zeiten archiviert, und unter "Archiv bearbeiten" lässt sich das verbrauchte Filament von Hand eintragen. Für ein vollständiges Archiv starten Sie den Druck stattdessen aus Bambuddy oder aus Ihrem Slicer.',
+      bodyInternalHistory: 'Diese Drucke liefen aus der eigenen Bibliothek des Druckers — ein erneuter Druck über sein Display, ein Start aus Handy oder eine früher gesendete und später gedruckte Datei. Druckübersicht liest Druckdateien über FTP, und das bedient nur Karte oder Stick, während der Drucker diese Bibliothek in einem Bereich ablegt, den FTP nicht erreicht — es gab also keine 3MF zu lesen. Keine Slicer-Einstellung ändert das, denn für diese Drucke wurde nichts gesendet. Sie werden weiterhin mit Namen und Zeiten archiviert, und unter "Archiv bearbeiten" lässt sich das verbrauchte Filament von Hand eintragen. Für ein vollständiges Archiv starten Sie den Druck stattdessen aus Druckübersicht oder aus Ihrem Slicer.',
       dismissLabel: 'Hinweis schließen',
     },
     searchPlaceholder: 'Archiv durchsuchen...',
@@ -2320,7 +2320,7 @@ export default {
     tempFanPresetsFan: 'Lüftergeschwindigkeit',
     tempFanPresetsReset: 'Auf Standardwerte zurücksetzen',
     concurrentUploadsTitle: 'Gleichzeitige Uploads',
-    concurrentUploadsDescription: 'Wie viele Drucker die Warteschlange gleichzeitig mit Dateien versorgen darf. Drucker nehmen Dateien nur langsam entgegen (ein großer Druck kann mehrere Minuten dauern), und jeder wartet, bis er an der Reihe ist — bei größeren Farmen verhindert ein höherer Wert also, dass der letzte Drucker eines Stapels erst alle anderen Übertragungen abwarten muss. Verringern Sie ihn, wenn Ihr Netzwerk oder der Bambuddy-Host mit parallelen Übertragungen Probleme hat.',
+    concurrentUploadsDescription: 'Wie viele Drucker die Warteschlange gleichzeitig mit Dateien versorgen darf. Drucker nehmen Dateien nur langsam entgegen (ein großer Druck kann mehrere Minuten dauern), und jeder wartet, bis er an der Reihe ist — bei größeren Farmen verhindert ein höherer Wert also, dass der letzte Drucker eines Stapels erst alle anderen Übertragungen abwarten muss. Verringern Sie ihn, wenn Ihr Netzwerk oder der Druckübersicht-Host mit parallelen Übertragungen Probleme hat.',
     concurrentUploadsLabel: 'Gleichzeitig belieferte Drucker',
     concurrentUploadsHelp: '1 beliefert immer nur einen Drucker (das bisherige Verhalten). Standard ist 4.',
     staggeredStart: 'Versetzter Start',
@@ -2330,7 +2330,7 @@ export default {
     preheatEnabled: 'Vorheizen & Soak aktivieren',
     preheatEnabledDesc: 'Wenn aus, starten Drucke aus der Warteschlange sofort. Jeder Warteschlangeneintrag kann das pro Druck überschreiben.',
     preheatFilamentTargetsLabel: 'Kammer-Ziel je Filament (°C)',
-    preheatFilamentTargetsHint: 'Bambuddy wählt das höchste Ziel über die geladenen AMS-Slots; reine PLA-Drucke ergeben 0 und überspringen die Kammerphase automatisch.',
+    preheatFilamentTargetsHint: 'Druckübersicht wählt das höchste Ziel über die geladenen AMS-Slots; reine PLA-Drucke ergeben 0 und überspringen die Kammerphase automatisch.',
     preheatFilamentTargetsReset: 'Auf Standardwerte zurücksetzen',
     preheatFilamentTargetsDefaultRow: 'Sonstige / nicht zugeordnet',
     preheatMaxWait: 'Max. Wartezeit (Sekunden)',
@@ -2391,7 +2391,7 @@ export default {
     authentication: 'Authentifizierung',
     authEnabledDescription: 'Ihre Instanz ist mit Benutzerauthentifizierung gesichert',
     authDisabledDescription: 'Aktivieren Sie die Anmeldepflicht und verwalten Sie den Benutzerzugriff',
-    authDisabledMessage: 'Aktivieren Sie die Authentifizierung, um Benutzerkonten zu erstellen, Berechtigungen zu verwalten und Ihre Bambuddy-Instanz zu sichern.',
+    authDisabledMessage: 'Aktivieren Sie die Authentifizierung, um Benutzerkonten zu erstellen, Berechtigungen zu verwalten und Ihre Druckübersicht-Instanz zu sichern.',
     enableAuthentication: 'Authentifizierung aktivieren',
     currentUser: 'Aktueller Benutzer',
     changePassword: 'Passwort ändern',
@@ -2430,10 +2430,10 @@ export default {
     deleteGroup: 'Gruppe löschen',
     // Modal: Disable auth
     disableAuthenticationTitle: 'Authentifizierung deaktivieren',
-    disableAuthenticationMessage: 'Möchten Sie die Authentifizierung wirklich deaktivieren? Dadurch wird Ihre Bambuddy-Instanz ohne Anmeldung zugänglich. Alle Benutzer bleiben in der Datenbank, aber die Authentifizierung wird deaktiviert.',
+    disableAuthenticationMessage: 'Möchten Sie die Authentifizierung wirklich deaktivieren? Dadurch wird Ihre Druckübersicht-Instanz ohne Anmeldung zugänglich. Alle Benutzer bleiben in der Datenbank, aber die Authentifizierung wird deaktiviert.',
     disableAuthentication: 'Authentifizierung deaktivieren',
     // Additional settings
-    configureBambuddy: 'Bambuddy konfigurieren',
+    configureBambuddy: 'Druckübersicht konfigurieren',
     systemDefault: 'Systemstandard',
     archiveSettings: 'Archiv-Einstellungen',
     newWindow: 'Neues Fenster',
@@ -2674,9 +2674,9 @@ export default {
     autoArchivePrints: 'Drucke automatisch archivieren',
     autoArchiveDescription: '3MF-Dateien automatisch speichern, wenn Drucke abgeschlossen sind',
     saveThumbnailsDescription: 'Vorschaubilder aus 3MF-Dateien extrahieren und speichern',
-    captureFinishPhotoDescription: 'Foto von der Druckerkamera aufnehmen, wenn der Druck abgeschlossen ist. Bambuddy zeichnet während des Drucks einen kurzen Zeitraffer auf, damit das Foto aus dem Moment vor dem Absenken der Druckplatte stammen kann. Die Zeitraffer-Datei bleibt erhalten, wenn du den Zeitraffer für diesen Druck aktiviert hast, andernfalls wird sie nach Aufnahme des Fotos automatisch gelöscht.',
+    captureFinishPhotoDescription: 'Foto von der Druckerkamera aufnehmen, wenn der Druck abgeschlossen ist. Druckübersicht zeichnet während des Drucks einen kurzen Zeitraffer auf, damit das Foto aus dem Moment vor dem Absenken der Druckplatte stammen kann. Die Zeitraffer-Datei bleibt erhalten, wenn du den Zeitraffer für diesen Druck aktiviert hast, andernfalls wird sie nach Aufnahme des Fotos automatisch gelöscht.',
     finishPhotoRestorePlate: 'Druckplatte für Abschlussfoto anheben',
-    finishPhotoRestorePlateDescription: 'Der Drucker senkt die Druckplatte am Druckende um etwa 100 mm ab, wodurch der fertige Druck unterhalb des Kamerabildausschnitts liegt. Bambuddy hebt sie wieder bis knapp über die zuletzt gedruckte Schicht an, nimmt das Foto auf und senkt sie danach wieder ab. Wird übersprungen, wenn die Druckhöhe unbekannt ist oder ein weiterer Auftrag in der Warteschlange steht.',
+    finishPhotoRestorePlateDescription: 'Der Drucker senkt die Druckplatte am Druckende um etwa 100 mm ab, wodurch der fertige Druck unterhalb des Kamerabildausschnitts liegt. Druckübersicht hebt sie wieder bis knapp über die zuletzt gedruckte Schicht an, nimmt das Foto auf und senkt sie danach wieder ab. Wird übersprungen, wenn die Druckhöhe unbekannt ist oder ein weiterer Auftrag in der Warteschlange steht.',
     ffmpegNotInstalled: 'ffmpeg nicht installiert',
     ffmpegRequired: 'Kameraaufnahme benötigt ffmpeg. Installieren über <brew>brew install ffmpeg</brew> (macOS) oder <apt>apt install ffmpeg</apt> (Linux).',
     // Camera
@@ -2714,7 +2714,7 @@ export default {
     // Updates
     printerFirmware: 'Drucker-Firmware',
     checkFirmwareDescription: 'Nach Firmware-Updates von Bambu Lab suchen',
-    bambuddySoftware: 'Bambuddy-Software',
+    bambuddySoftware: 'Druckübersicht-Software',
     autoCheckDescription: 'Automatisch beim Start nach neuen Versionen suchen',
     checkNow: 'Jetzt prüfen',
     updateAvailableVersion: 'Update verfügbar: v{{version}}',
@@ -2735,8 +2735,8 @@ export default {
     goToBackup: 'Zur Sicherung',
     // Network tab
     externalUrl: 'Externe URL',
-    externalUrlDescription: 'Die externe URL, unter der Bambuddy erreichbar ist. Wird für Benachrichtigungsbilder und externe Integrationen verwendet.',
-    bambuddyUrl: 'Bambuddy-URL',
+    externalUrlDescription: 'Die externe URL, unter der Druckübersicht erreichbar ist. Wird für Benachrichtigungsbilder und externe Integrationen verwendet.',
+    bambuddyUrl: 'Druckübersicht-URL',
     externalUrlHint: 'Protokoll und Port angeben (z.B. http://192.168.1.100:8000)',
     ftpRetry: 'FTP-Wiederholung',
     ftpRetryDescription: 'FTP-Operationen bei unzuverlässigem Drucker-WLAN wiederholen. Gilt für 3MF-Downloads, Druck-Uploads, Zeitraffer-Downloads und Firmware-Updates.',
@@ -2907,7 +2907,7 @@ export default {
       enabledFromFile: 'At-Rest-Verschlüsselung aktiv (Schlüssel aus dem Datenverzeichnis geladen)',
       enabledGenerated: 'At-Rest-Verschlüsselung aktiv mit automatisch generiertem Schlüssel',
       notConfigured: 'At-Rest-Verschlüsselung nicht konfiguriert',
-      notConfiguredDesc: 'TOTP-Geheimnisse und OIDC-Client-Secrets werden im Klartext gespeichert. Setze MFA_ENCRYPTION_KEY oder starte Bambuddy mit beschreibbarem Datenverzeichnis neu, damit ein Schlüssel automatisch erzeugt wird.',
+      notConfiguredDesc: 'TOTP-Geheimnisse und OIDC-Client-Secrets werden im Klartext gespeichert. Setze MFA_ENCRYPTION_KEY oder starte Druckübersicht mit beschreibbarem Datenverzeichnis neu, damit ein Schlüssel automatisch erzeugt wird.',
       allEncrypted: 'Alle MFA-Geheimnisse sind verschlüsselt gespeichert.',
       legacyRowsLabel: 'Klartext-Zeilen (Altbestand)',
       encryptedRowsLabel: 'Verschlüsselte Zeilen',
@@ -2915,7 +2915,7 @@ export default {
       backupHint: 'Der automatisch erzeugte Schlüssel liegt unter DATA_DIR/.mfa_encryption_key und wird in lokalen Backup-ZIPs mitgesichert. Backups sicher aufbewahren oder MFA_ENCRYPTION_KEY explizit setzen.',
       decryptionBrokenTitle: 'Verschlüsselungsschlüssel fehlt',
       decryptionBrokenError: '{{count}} verschlüsselte Datensätze können nicht entschlüsselt werden, weil der Schlüssel nicht mehr verfügbar ist. Den vorherigen MFA_ENCRYPTION_KEY oder DATA_DIR/.mfa_encryption_key wiederherstellen.',
-      migrationErrorWarning: '{{count}} Legacy-Eintrag/Einträge konnten beim Start nicht verschlüsselt werden. Prüfen Sie die Server-Logs und starten Sie Bambuddy neu.',
+      migrationErrorWarning: '{{count}} Legacy-Eintrag/Einträge konnten beim Start nicht verschlüsselt werden. Prüfen Sie die Server-Logs und starten Sie Druckübersicht neu.',
     },
 
 
@@ -3079,7 +3079,7 @@ export default {
     actionFailed: 'Aktion konnte nicht gesendet werden',
     runoutExpectedSlot: 'Das Filament in {{ranOut}} ist aufgebraucht. Der Drucker wartet jetzt auf kompatibles Filament in {{expected}}. Legen Sie eine Spule in {{expected}} ein und wählen Sie dann Wiederholen.',
     runoutExpectedSlotOnly: 'Der Drucker wartet auf kompatibles Filament in {{expected}}. Legen Sie dort eine Spule ein und wählen Sie dann Wiederholen.',
-    runoutSlotUnknown: 'Das Filament ist aufgebraucht und der Druck ist pausiert. Bambuddy konnte nicht ermitteln, welchen Slot der Drucker jetzt erwartet — prüfen Sie am Druckerdisplay, welcher Slot angefordert wird.',
+    runoutSlotUnknown: 'Das Filament ist aufgebraucht und der Druck ist pausiert. Druckübersicht konnte nicht ermitteln, welchen Slot der Drucker jetzt erwartet — prüfen Sie am Druckerdisplay, welcher Slot angefordert wird.',
     actions: {
       RESUME_PRINTING: 'Druck fortsetzen',
       RESUME_PRINTING_DEFECTS: 'Fortsetzen (Mängel akzeptabel)',
@@ -3174,7 +3174,7 @@ export default {
 
   // Login page
   login: {
-    title: 'Bambuddy Anmeldung',
+    title: 'Druckübersicht Anmeldung',
     subtitle: 'Melden Sie sich bei Ihrem Konto an',
     username: 'Benutzername',
     usernamePlaceholder: 'Benutzername eingeben',
@@ -3222,7 +3222,7 @@ export default {
     sending: 'Wird gesendet...',
     sendResetEmail: 'Zurücksetzungs-E-Mail senden',
     howToReset: 'So setzen Sie Ihr Passwort zurück:',
-    resetStep1: 'Kontaktieren Sie Ihren Bambuddy-Administrator',
+    resetStep1: 'Kontaktieren Sie Ihren Druckübersicht-Administrator',
     resetStep2: 'Bitten Sie ihn, Ihr Passwort in der Benutzerverwaltung zurückzusetzen',
     resetStep3: 'Er kann ein neues temporäres Passwort für Sie festlegen',
     resetStep4: 'Melden Sie sich mit dem neuen Passwort an und ändern Sie es in den Einstellungen',
@@ -3272,8 +3272,8 @@ export default {
 
   // Setup page
   setup: {
-    title: 'Bambuddy Einrichtung',
-    subtitle: 'Konfigurieren Sie die Authentifizierung für Ihre Bambuddy-Instanz',
+    title: 'Druckübersicht Einrichtung',
+    subtitle: 'Konfigurieren Sie die Authentifizierung für Ihre Druckübersicht-Instanz',
     enableAuth: 'Authentifizierung aktivieren',
     adminAccount: 'Admin-Konto',
     adminAccountDesc: 'Wenn bereits Admin-Benutzer existieren, wird die Authentifizierung mit den vorhandenen Admin-Konten aktiviert. Lassen Sie die Felder unten leer, um vorhandene Admins zu verwenden, oder geben Sie neue Anmeldedaten ein, um einen neuen Admin-Benutzer zu erstellen.',
@@ -3430,7 +3430,7 @@ export default {
   // Users management
   users: {
     title: 'Benutzerverwaltung',
-    subtitle: 'Benutzer und deren Zugriff auf Ihre Bambuddy-Instanz verwalten',
+    subtitle: 'Benutzer und deren Zugriff auf Ihre Druckübersicht-Instanz verwalten',
     backToSettings: 'Zurück zu Einstellungen',
     createUser: 'Benutzer erstellen',
     noPermission: 'Sie haben keine Berechtigung, auf diese Seite zuzugreifen.',
@@ -3575,7 +3575,7 @@ export default {
       connectButton: 'Orca Cloud verbinden',
       connect: {
         title: 'Mit Orca Cloud verbinden',
-        description: 'Melden Sie sich bei Ihrem Orca Cloud-Konto an, um Ihre Slicer-Profile in Bambuddy zu synchronisieren.',
+        description: 'Melden Sie sich bei Ihrem Orca Cloud-Konto an, um Ihre Slicer-Profile in Druckübersicht zu synchronisieren.',
       },
       device: {
         title: 'Bambuddy in Orca Cloud genehmigen',
@@ -3672,7 +3672,7 @@ export default {
       setTokenButton: 'Token setzen',
       useToken: 'Stattdessen Zugriffstoken verwenden',
       captchaTitle: 'Bambu Cloud verlangt ein CAPTCHA',
-      captchaBody: 'Bambu fordert für dein Netzwerk eine CAPTCHA-Prüfung, bevor eine Anmeldung akzeptiert wird, und diese Prüfung lässt sich aus Bambuddy heraus nicht beantworten. E-Mail und Passwort sind nicht das Problem. Die Sperre hängt an deiner öffentlichen IP-Adresse und löst sich normalerweise innerhalb weniger Stunden von selbst — wiederholte Versuche verlängern sie. Um dich jetzt anzumelden, verwende stattdessen ein Zugriffstoken aus einer Browser-Sitzung.',
+      captchaBody: 'Bambu fordert für dein Netzwerk eine CAPTCHA-Prüfung, bevor eine Anmeldung akzeptiert wird, und diese Prüfung lässt sich aus Druckübersicht heraus nicht beantworten. E-Mail und Passwort sind nicht das Problem. Die Sperre hängt an deiner öffentlichen IP-Adresse und löst sich normalerweise innerhalb weniger Stunden von selbst — wiederholte Versuche verlängern sie. Um dich jetzt anzumelden, verwende stattdessen ein Zugriffstoken aus einer Browser-Sitzung.',
       useEmail: 'Stattdessen mit E-Mail anmelden',
       toast: {
         loggedIn: 'Erfolgreich angemeldet',
@@ -4592,8 +4592,8 @@ export default {
       invalidHex: '6 Hex-Zeichen (RRGGBB) oder 8 (RRGGBBAA) eingeben. Anderenfalls wird das Feld nicht übernommen.',
     },
     spoolmanMixedContentTitle: 'Spoolman lässt sich nicht über HTTPS laden — Browser blockiert gemischte Inhalte',
-    spoolmanMixedContentBody: 'Bambuddy wird über HTTPS ausgeliefert (über deinen Reverse-Proxy), aber deine Spoolman-URL ist nach wie vor HTTP. Browser blockieren gemischte Inhalte aus Sicherheitsgründen, daher kann die eingebettete Spoolman-Oberfläche nicht geladen werden. Spoolman muss ebenfalls über HTTPS erreichbar sein.',
-    spoolmanMixedContentFixReverseProxy: 'Stelle Spoolman hinter denselben Reverse-Proxy wie Bambuddy (Traefik / Nginx / Caddy) mit HTTPS und aktualisiere die Spoolman-URL in den Einstellungen auf die neue HTTPS-Adresse.',
+    spoolmanMixedContentBody: 'Druckübersicht wird über HTTPS ausgeliefert (über deinen Reverse-Proxy), aber deine Spoolman-URL ist nach wie vor HTTP. Browser blockieren gemischte Inhalte aus Sicherheitsgründen, daher kann die eingebettete Spoolman-Oberfläche nicht geladen werden. Spoolman muss ebenfalls über HTTPS erreichbar sein.',
+    spoolmanMixedContentFixReverseProxy: 'Stelle Spoolman hinter denselben Reverse-Proxy wie Druckübersicht (Traefik / Nginx / Caddy) mit HTTPS und aktualisiere die Spoolman-URL in den Einstellungen auf die neue HTTPS-Adresse.',
     spoolmanMixedContentFixOpenNewTab: 'Als Workaround kannst du Spoolman in einem neuen Tab über HTTP öffnen — gemischte Inhalte werden nur innerhalb eingebetteter Frames blockiert, ein eigener Tab funktioniert weiterhin.',
     spoolmanOpenInNewTab: 'Spoolman in neuem Tab öffnen',
     labels: {
@@ -5104,8 +5104,8 @@ export default {
     cloudLoginRequiredShort: 'Cloud-Login erforderlich',
     githubDescription: 'Synchronisieren Sie Ihre Profile automatisch mit einem privaten GitHub-Repository für Backup und Versionsverlauf.',
     repoIsPrivate: 'Repository ist privat — Sicherung möglich.',
-    repoIsPublicWarning: 'Das Repository ist ÖFFENTLICH. Bambuddy-Backups enthalten MQTT-Zugangsdaten, Home-Assistant-Tokens, Prometheus-Tokens, Ihre Bambu-Cloud-E-Mail-Adresse und über K-Profile auch Drucker-Zugangscodes. Speichern ist blockiert, bis Sie das Repository in den Einstellungen Ihres Anbieters auf privat stellen.',
-    repoVisibilityUnknown: 'Die Sichtbarkeit des Repositories konnte nicht bestimmt werden. Bambuddy sichert nur in Repositories, die nachweislich privat sind; Speichern wird blockiert.',
+    repoIsPublicWarning: 'Das Repository ist ÖFFENTLICH. Druckübersicht-Backups enthalten MQTT-Zugangsdaten, Home-Assistant-Tokens, Prometheus-Tokens, Ihre Bambu-Cloud-E-Mail-Adresse und über K-Profile auch Drucker-Zugangscodes. Speichern ist blockiert, bis Sie das Repository in den Einstellungen Ihres Anbieters auf privat stellen.',
+    repoVisibilityUnknown: 'Die Sichtbarkeit des Repositories konnte nicht bestimmt werden. Druckübersicht sichert nur in Repositories, die nachweislich privat sind; Speichern wird blockiert.',
     repositoryUrl: 'Repository-URL',
     repoUrlPlaceholderGitHub: 'https://github.com/username/repo-name',
 	repoUrlPlaceholderGitea: 'https://gitea.example.com/username/repo-name',
@@ -5139,7 +5139,7 @@ export default {
     cloudProfilesDescription: 'Filament-, Drucker- und Prozessprofile aus Bambu Cloud und Orca Cloud',
     cloudProfilesAccounts: 'Verbundene Konten — Bambu Cloud: {{bambu}}, Orca Cloud: {{orca}}',
     appSettings: 'App-Einstellungen',
-    appSettingsDescription: 'Bambuddy-Konfiguration (komplette Datenbank)',
+    appSettingsDescription: 'Druckübersicht-Konfiguration (komplette Datenbank)',
     spoolInventory: 'Spulenbestand',
     spoolInventoryDescription: 'Filamentspulen, Nutzungsverlauf und Kostenverfolgung',
     printArchives: 'Druckarchive',
@@ -5185,7 +5185,7 @@ export default {
       confirmMessageOverwrite: 'Die ausgewählten Kategorien werden aus diesem Commit wiederhergestellt und lokal vorhandene Einträge überschrieben. Dies kann nicht rückgängig gemacht werden.',
       kprofilesOverwriteCaveat: 'K-Profile sind die Ausnahme: Das Schreiben eines Slots ersetzt immer die Kalibrierung auf dem Drucker.',
       tally: '{{restored}} wiederhergestellt, {{skipped}} übersprungen, {{failed}} fehlgeschlagen',
-      reloadHint: 'Bambuddy neu laden, damit die wiederhergestellten Daten überall erscheinen.',
+      reloadHint: 'Druckübersicht neu laden, damit die wiederhergestellten Daten überall erscheinen.',
       partialHint: 'Die oben aufgeführten Kategorien wurden abgeschlossen und sind gespeichert. Fehlende Kategorien wurden nicht ausgeführt.',
       failed: 'Wiederherstellung fehlgeschlagen.',
       loadFailed: 'Das Backup-Repository konnte nicht gelesen werden.',
@@ -5215,7 +5215,7 @@ export default {
         settingsCredentialsSkipped: '{{count}} zugangsdatenähnliche Schlüssel übersprungen - Geheimnisse bitte manuell erneut eingeben',
         settingsAuthSkipped: '{{count}} Authentifizierungseinstellungen übersprungen - ändern Sie diese unter Einstellungen > Authentifizierung, damit die Aussperrprüfungen greifen',
         settingsCompanionSkipped: '{{keys}} bleiben ausgeschaltet - die jeweils benötigten Zugangsdaten lassen sich nicht aus einem Backup wiederherstellen und sind auf dieser Instanz nicht hinterlegt, ein Einschalten würde die Integration also ohne Authentifizierung lassen',
-        settingsMqttRelayFailed: 'MQTT-Einstellungen wiederhergestellt, aber das Relay konnte nicht neu verbunden werden - Bambuddy neu starten',
+        settingsMqttRelayFailed: 'MQTT-Einstellungen wiederhergestellt, aber das Relay konnte nicht neu verbunden werden - Druckübersicht neu starten',
         kprofilesAlwaysOverwrite: 'K-Profile überschreiben immer den passenden Slot auf dem Drucker',
         kprofilesAckUnreliable: 'Ein Drucker, der nicht antwortet, zählt weiterhin als wiederhergestellt - überprüfen Sie die Profile am Drucker',
         kprofilesPrinterMissing: 'Kein Drucker mit der Seriennummer {{serial}} - übersprungen',
@@ -5243,7 +5243,7 @@ export default {
 
     // Local Backup
     localBackup: 'Lokale Sicherung',
-    localBackupDescription: 'Erstellen Sie eine vollständige Sicherung Ihrer Bambuddy-Daten einschließlich Datenbank, Archive, Uploads und aller Dateien.',
+    localBackupDescription: 'Erstellen Sie eine vollständige Sicherung Ihrer Druckübersicht-Daten einschließlich Datenbank, Archive, Uploads und aller Dateien.',
     downloadBackupLabel: 'Sicherung herunterladen',
     completeBackupZip: 'Vollständige Sicherung: Datenbank + alle Dateien (ZIP)',
     download: 'Herunterladen',
@@ -5259,7 +5259,7 @@ export default {
     restoreConfirmMessage: 'Sind Sie sicher, dass Sie von "{{filename}}" wiederherstellen möchten? Dies ersetzt Ihre aktuelle Datenbank und alle Dateien vollständig. Die Anwendung muss nach der Wiederherstellung neu gestartet werden.',
     restoreConfirmButton: 'Sicherung wiederherstellen',
     uploadingFile: 'Sicherungsdatei wird hochgeladen...',
-    backupRestoredRestart: 'Sicherung wiederhergestellt. Bitte starten Sie Bambuddy neu.',
+    backupRestoredRestart: 'Sicherung wiederhergestellt. Bitte starten Sie Druckübersicht neu.',
     failedToRestore: 'Sicherung wiederherstellen fehlgeschlagen. Bitte überprüfen Sie das Dateiformat.',
     reloadNow: 'Jetzt neu laden',
     creatingBackup: 'Sicherung erstellen',
@@ -5334,17 +5334,17 @@ export default {
     defaultPathLabel: 'Standard:',
     // Backup output-path probe (#2544)
     pathCheck: {
-      title: 'Bambuddy kann nicht in dieses Verzeichnis schreiben',
+      title: 'Druckübersicht kann nicht in dieses Verzeichnis schreiben',
       howToFix: 'So beheben Sie das:',
-      sandboxed: 'Der Bambuddy-Dienst kann nicht nach {{path}} schreiben. Seine systemd-Unit läuft mit ProtectSystem=strict, wodurch jedes Verzeichnis außerhalb der Installations-, Daten- und Log-Verzeichnisse für den Dienst schreibgeschützt ist - auch eines, in das Sie aus Ihrer eigenen Shell schreiben können.',
+      sandboxed: 'Der Druckübersicht-Dienst kann nicht nach {{path}} schreiben. Seine systemd-Unit läuft mit ProtectSystem=strict, wodurch jedes Verzeichnis außerhalb der Installations-, Daten- und Log-Verzeichnisse für den Dienst schreibgeschützt ist - auch eines, in das Sie aus Ihrer eigenen Shell schreiben können.',
       read_only: '{{path}} liegt auf einem schreibgeschützten Dateisystem.',
-      permission_denied: 'Bambuddy darf nicht nach {{path}} schreiben. Prüfen Sie Eigentümer und Rechte des Verzeichnisses.',
+      permission_denied: 'Druckübersicht darf nicht nach {{path}} schreiben. Prüfen Sie Eigentümer und Rechte des Verzeichnisses.',
       no_space: 'Das Dateisystem, auf dem {{path}} liegt, ist voll.',
       not_a_directory: '{{path}} existiert, ist aber kein Verzeichnis.',
       missing: '{{path}} existiert nicht und konnte nicht angelegt werden.',
-      error: 'Bambuddy kann nicht nach {{path}} schreiben.',
+      error: 'Druckübersicht kann nicht nach {{path}} schreiben.',
       ephemeralTitle: 'Diese Backups überleben einen Container-Neustart nicht',
-      container_ephemeral: '{{path}} liegt im Bambuddy-Container, nicht auf dem Host. Dort geschriebene Backups gehen verloren, sobald der Container neu erstellt wird. Binden Sie das Verzeichnis vom Host ein:',
+      container_ephemeral: '{{path}} liegt im Druckübersicht-Container, nicht auf dem Host. Dort geschriebene Backups gehen verloren, sobald der Container neu erstellt wird. Binden Sie das Verzeichnis vom Host ein:',
     },
 
     // Category labels
@@ -5516,7 +5516,7 @@ export default {
       right: 'Rechts',
       notes: 'Notizen (lokal gespeichert)',
       notesPlaceholder: 'Notizen zu diesem Profil hinzufügen...',
-      notesHelp: 'Notizen werden in Bambuddy gespeichert, nicht auf dem Drucker',
+      notesHelp: 'Notizen werden in Druckübersicht gespeichert, nicht auf dem Drucker',
       syncing: 'Synchronisiert mit Drucker...',
       savingExtruder: 'Speichern auf Extruder {{current}}/{{total}}...',
       pleaseWait: 'Bitte warten',
@@ -5608,7 +5608,7 @@ export default {
       configured: 'Schnittstellenüberschreibung aktiv',
       optional: 'Optional - verwenden wenn die automatisch erkannte IP falsch ist (z.B. mehrere NICs, Docker, VPN)',
       placeholder: 'Automatisch erkennen (Standard)...',
-      hint: 'Überschreibt die per SSDP beworbene und im TLS-Zertifikat verwendete IP-Adresse. Nützlich wenn Bambuddy mehrere Netzwerkschnittstellen hat.',
+      hint: 'Überschreibt die per SSDP beworbene und im TLS-Zertifikat verwendete IP-Adresse. Nützlich wenn Druckübersicht mehrere Netzwerkschnittstellen hat.',
     },
     mode: {
       title: 'Modus',
@@ -5663,7 +5663,7 @@ export default {
     howItWorks: {
       title: 'So funktioniert es',
       step1: 'Im selben LAN erscheinen virtuelle Drucker automatisch in deinem Slicer (Bambu Studio / OrcaSlicer). Aus anderen Netzwerken füge sie manuell per IP-Adresse und Zugangscode hinzu.',
-      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Bambuddy zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
+      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Druckübersicht zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
       step3: 'Im Proxy-Modus leitet der virtuelle Drucker den gesamten Datenverkehr an einen echten Drucker weiter — Drucke starten sofort wie bei einer direkten Verbindung.',
     },
     status: {
@@ -5848,7 +5848,7 @@ export default {
     },
     autoAdd: {
       confirmTitle: 'Auch die anderen Sensoren hinzufügen?',
-      confirmMessage: 'Bambuddy hat für diesen Lagerort auch weitere Sensoren gefunden. Wählen Sie aus, welche zusätzlich hinzugefügt werden sollen.',
+      confirmMessage: 'Druckübersicht hat für diesen Lagerort auch weitere Sensoren gefunden. Wählen Sie aus, welche zusätzlich hinzugefügt werden sollen.',
       added: 'Zusätzlich hinzugefügt: {{names}}',
       noneFound: 'Keine passenden Temperatur-, Luftfeuchtigkeits- oder Batteriesensoren für diesen Lagerort gefunden.',
       onlyThisOne: 'Nur dieser',
@@ -5859,7 +5859,7 @@ export default {
       description: 'Diese Werte werden verwendet, wenn ein Temperatur-, Luftfeuchtigkeits- oder Batteriesensor automatisch mit einem Lagerort gebunden wird.',
       generalSettings: 'Allgemeine Einstellungen',
       pollInterval: 'Aktualisierungsintervall (Sekunden)',
-      pollIntervalHint: 'Wie oft Bambuddy Home Assistant abfragt und die Sensorwerte auf dem Bildschirm aktualisiert. Minimum 60 Sekunden.',
+      pollIntervalHint: 'Wie oft Druckübersicht Home Assistant abfragt und die Sensorwerte auf dem Bildschirm aktualisiert. Minimum 60 Sekunden.',
       colorizeValues: 'Sensorwerte anhand ihrer Alarmschwellen farbig darstellen',
       aboveColor: 'Farbe für Überschreitung',
       belowColor: 'Farbe für Unterschreitung',
@@ -6048,7 +6048,7 @@ export default {
     restEnergyTotalMultiplier: 'Multiplikator Gesamtzähler',
     restEnergyTotalPathHint: 'z.B. aenergy.total',
     restEnergyTotalHint:
-      'Viele Steckdosen — darunter alle Shellys — liefern nur einen Gesamtzähler, der nie zurückgesetzt wird. Er gehört hierher, nicht in das Feld darüber: als Tagesverbrauch gelesen würde er um Mitternacht nie zurückspringen, und Gestern und Gesamt blieben leer. Bambuddy errechnet Heute und Gestern daraus, wofür ein bis zwei Tage an Messwerten nötig sind. Ein Shelly liefert Wattstunden, also Multiplikator 0.001 verwenden.',
+      'Viele Steckdosen — darunter alle Shellys — liefern nur einen Gesamtzähler, der nie zurückgesetzt wird. Er gehört hierher, nicht in das Feld darüber: als Tagesverbrauch gelesen würde er um Mitternacht nie zurückspringen, und Gestern und Gesamt blieben leer. Druckübersicht errechnet Heute und Gestern daraus, wofür ein bis zwei Tage an Messwerten nötig sind. Ein Shelly liefert Wattstunden, also Multiplikator 0.001 verwenden.',
     restEnergyMultiplier: 'Energie Multiplikator',
     restUrlRequired: 'Mindestens eine URL (ON oder OFF) ist für REST-Steckdosen erforderlich',
     restHeadersHint: 'z. B. {"Authorization": "Bearer your-token"}',
@@ -6358,7 +6358,7 @@ export default {
     title: 'Seitenleisten-Links',
     sidebarLayout: 'Seitenleiste',
     sidebarLayoutDescription: 'Integrierte Seiten ein- oder ausblenden, externe Links hinzufügen und Elemente ziehen, um die Seitenleisten-Navigation neu zu ordnen.',
-    systemPages: 'Bambuddy-Seiten',
+    systemPages: 'Druckübersicht-Seiten',
     externalLinks: 'Externe Links',
     visibleInSidebar: 'In Seitenleiste sichtbar',
     hiddenFromSidebar: 'In Seitenleiste ausgeblendet',
@@ -6574,7 +6574,7 @@ export default {
   // Email Settings
   emailSettings: {
     placeholders: {
-      fromName: 'Bambuddy',
+      fromName: 'Druckübersicht',
     },
   },
 
@@ -6829,7 +6829,7 @@ export default {
       hostname: 'Host',
       uptime: 'Betriebszeit',
       systemConfig: 'Backend & Auth',
-      backendUrl: 'Bambuddy Backend URL',
+      backendUrl: 'Druckübersicht-Backend-URL',
       apiToken: 'API-Token',
       apiTokenPlaceholder: 'API-Token eingeben',
       saveConfig: 'Konfiguration speichern',
@@ -6971,8 +6971,8 @@ export default {
         skip: 'Nicht geprüft — eine aktive MQTT-Verbindung ist erforderlich. Bei älteren Slicern, in denen diese Einstellung nur im Slicer existiert, meldet sie der Drucker nicht — diese Prüfung besteht auch dann, wenn die Option deaktiviert ist. Prüfen Sie Installationsschritt 4 in diesem Fall manuell.',
         skip_unsupported_model: 'Dieses Modell hat einen SD-Slot, aber keine Möglichkeit, die Option zu aktivieren — die aktuelle P1-Firmware zeigt den Schalter in Bambu Studio nicht an und der Drucker hat kein Display. Hier gibt es nichts zu beheben; archivierten Drucken fehlen möglicherweise Vorschaubilder und Slicer-Metadaten, bis Bambu Lab dies per Firmware unterstützt.',
         fail_no_media: 'Die Option ist aktiviert, aber der Drucker meldet weder Karte noch Stick im Steckplatz, daher können gesendete Dateien nirgends abgelegt werden. Legen Sie einen ein und drucken Sie erneut — bis dahin fehlen jedem archivierten Druck Vorschaubild und Slicer-Metadaten.',
-        warn_internal_storage: 'Die Option ist aktiviert und ein Speicher ist vorhanden, aber der letzte Druck landete dennoch im internen Speicher des Druckers, den Bambuddy nicht lesen kann. Bei der H2-Serie und dem P2S sendet die Schaltfläche "Drucken" in Bambu Studio unabhängig von dieser Option immer dorthin. Drucke werden mit Namen und Zeiten archiviert, aber ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive den Druck aus Bambuddy starten oder in OrcaSlicer slicen — oder in Bambu Studio "Senden" mit "Extern" verwenden und den Druck danach starten.',
-        warn_internal_history: 'Die Option ist aktiv und Speicher vorhanden, aber der letzte Druck lief aus einer Datei, die bereits auf dem Drucker lag — ein erneuter Druck über sein Display, ein Start aus Handy oder eine früher gesendete Datei. Diese Bibliothek liegt im internen Speicher, den Bambuddy nicht lesen kann, und keine Einstellung ändert das, denn für diesen Druck wurde nichts gesendet. Er wird weiterhin mit Namen und Zeiten archiviert, nur ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive Drucke aus Bambuddy starten oder aus dem Slicer senden.',
+        warn_internal_storage: 'Die Option ist aktiviert und ein Speicher ist vorhanden, aber der letzte Druck landete dennoch im internen Speicher des Druckers, den Druckübersicht nicht lesen kann. Bei der H2-Serie und dem P2S sendet die Schaltfläche "Drucken" in Bambu Studio unabhängig von dieser Option immer dorthin. Drucke werden mit Namen und Zeiten archiviert, aber ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive den Druck aus Druckübersicht starten oder in OrcaSlicer slicen — oder in Bambu Studio "Senden" mit "Extern" verwenden und den Druck danach starten.',
+        warn_internal_history: 'Die Option ist aktiv und Speicher vorhanden, aber der letzte Druck lief aus einer Datei, die bereits auf dem Drucker lag — ein erneuter Druck über sein Display, ein Start aus Handy oder eine früher gesendete Datei. Diese Bibliothek liegt im internen Speicher, den Druckübersicht nicht lesen kann, und keine Einstellung ändert das, denn für diesen Druck wurde nichts gesendet. Er wird weiterhin mit Namen und Zeiten archiviert, nur ohne Vorschaubild und Slicer-Metadaten. Für vollständige Archive Drucke aus Druckübersicht starten oder aus dem Slicer senden.',
       },
       port_rtsps: {
         title: 'Kameraport ({{protocol}} {{port}})',
@@ -6982,20 +6982,20 @@ export default {
       network_mode: {
         title: 'Docker-Netzwerkmodus',
         pass: 'Läuft im Host-Netzwerkmodus.',
-        warn: 'Bambuddy läuft im Docker-Bridge-Netzwerkmodus. Die Druckererkennung und der virtuelle Drucker benötigen den Host-Netzwerkmodus — erstellen Sie den Container mit "network_mode: host" neu.',
+        warn: 'Druckübersicht läuft im Docker-Bridge-Netzwerkmodus. Die Druckererkennung und der virtuelle Drucker benötigen den Host-Netzwerkmodus — erstellen Sie den Container mit "network_mode: host" neu.',
         skip: 'Läuft nicht in Docker — nicht zutreffend.',
       },
       subnet: {
         title: 'Netzwerk-Subnetz',
-        pass: 'Drucker und Bambuddy befinden sich im selben Subnetz.',
-        warn: 'Der Drucker ({{printer_ip}}) und Bambuddy ({{host_ip}}) befinden sich in unterschiedlichen Subnetzen. Sie können sich möglicherweise nicht erreichen, sofern kein Routing zwischen den Subnetzen konfiguriert ist.',
+        pass: 'Drucker und Druckübersicht befinden sich im selben Subnetz.',
+        warn: 'Der Drucker ({{printer_ip}}) und Druckübersicht ({{host_ip}}) befinden sich in unterschiedlichen Subnetzen. Sie können sich möglicherweise nicht erreichen, sofern kein Routing zwischen den Subnetzen konfiguriert ist.',
         skip: 'Subnetz konnte nicht ermittelt werden — übersprungen.',
       },
       mqtt_auth: {
         title: 'Drucker-Zugangsdaten',
         pass: 'Der Drucker hat die Verbindung akzeptiert.',
-        fail: 'Der Drucker ist erreichbar, aber Bambuddy ist nicht mit ihm verbunden. Höchstwahrscheinlich ist der Zugangscode oder die Seriennummer falsch — der Zugangscode ändert sich bei jedem Umschalten von „Nur LAN“ oder des Entwicklermodus, kopieren Sie ihn also erneut vom Druckerbildschirm. Ein Drucker, der gerade neu startet oder bereits die maximale Anzahl gleichzeitiger Verbindungen erreicht hat, sieht genauso aus.',
-        fail_auth_rejected: 'Der Drucker hat die Zugangsdaten von Bambuddy abgelehnt. Der Zugangscode oder die Seriennummer ist falsch — der Zugangscode ändert sich bei jedem Umschalten von „Nur LAN“ oder des Entwicklermodus. Kopieren Sie ihn erneut vom Druckerbildschirm und speichern Sie ihn in den Druckereinstellungen.',
+        fail: 'Der Drucker ist erreichbar, aber Druckübersicht ist nicht mit ihm verbunden. Höchstwahrscheinlich ist der Zugangscode oder die Seriennummer falsch — der Zugangscode ändert sich bei jedem Umschalten von „Nur LAN“ oder des Entwicklermodus, kopieren Sie ihn also erneut vom Druckerbildschirm. Ein Drucker, der gerade neu startet oder bereits die maximale Anzahl gleichzeitiger Verbindungen erreicht hat, sieht genauso aus.',
+        fail_auth_rejected: 'Der Drucker hat die Zugangsdaten von Druckübersicht abgelehnt. Der Zugangscode oder die Seriennummer ist falsch — der Zugangscode ändert sich bei jedem Umschalten von „Nur LAN“ oder des Entwicklermodus. Kopieren Sie ihn erneut vom Druckerbildschirm und speichern Sie ihn in den Druckereinstellungen.',
         skip: 'Nicht geprüft — der Drucker konnte nicht erreicht werden.',
       },
       developer_mode: {
@@ -7031,12 +7031,12 @@ export default {
       'ftp-auth-rejected': {
         name: 'Drucker hat den Zugriffscode abgelehnt',
         cause: 'Der Drucker hat die Anmeldung für die Dateiübertragung abgelehnt. Der Zugriffscode ist falsch oder hat sich nach dem Umschalten des Entwicklermodus geändert.',
-        fix: 'Kopiere den Zugriffscode erneut vom Druckerbildschirm (LAN-Einstellungen) und aktualisiere ihn in den Druckereinstellungen in Bambuddy.',
+        fix: 'Kopiere den Zugriffscode erneut vom Druckerbildschirm (LAN-Einstellungen) und aktualisiere ihn in den Druckereinstellungen in Druckübersicht.',
       },
       'ftp-connection-timeout': {
         name: 'Zeitüberschreitung bei der Dateiübertragung',
-        cause: 'Bambuddy konnte den Dateiübertragungs-Port des Druckers (FTPS 990) nicht erreichen. Der Port ist blockiert, oder der Drucker ist aus oder in einem anderen Subnetz.',
-        fix: 'Stelle sicher, dass Port 990 zwischen Bambuddy und dem Drucker nicht blockiert wird und beide im selben Netzwerk sind.',
+        cause: 'Druckübersicht konnte den Dateiübertragungs-Port des Druckers (FTPS 990) nicht erreichen. Der Port ist blockiert, oder der Drucker ist aus oder in einem anderen Subnetz.',
+        fix: 'Stelle sicher, dass Port 990 zwischen Druckübersicht und dem Drucker nicht blockiert wird und beide im selben Netzwerk sind.',
       },
       'ftp-ssl-error': {
         name: 'Sicherer Dateiübertragungs-Handshake fehlgeschlagen',
@@ -7061,7 +7061,7 @@ export default {
       'database-locked': {
         name: 'Datenbank-Schreibkonflikte',
         cause: 'Die SQLite-Datenbank meldet unter Last "database is locked"-Fehler — häufig beim Betrieb mehrerer Drucker gleichzeitig.',
-        fix: 'Stelle Bambuddy auf eine externe PostgreSQL-Datenbank um. Siehe die PostgreSQL-Anleitung in der Dokumentation.',
+        fix: 'Stelle Druckübersicht auf eine externe PostgreSQL-Datenbank um. Siehe die PostgreSQL-Anleitung in der Dokumentation.',
       },
     },
   },
@@ -7084,7 +7084,7 @@ export default {
       },
       running: {
         title: 'Dienste laufen',
-        fail: 'Der virtuelle Drucker ist aktiviert, aber seine Dienste laufen nicht. Prüfen Sie das Bambuddy-Protokoll — meist stoppt sie ein Bind-IP-Konflikt oder ein Berechtigungsfehler.',
+        fail: 'Der virtuelle Drucker ist aktiviert, aber seine Dienste laufen nicht. Prüfen Sie das Druckübersicht-Protokoll — meist stoppt sie ein Bind-IP-Konflikt oder ein Berechtigungsfehler.',
       },
       bind_interface: {
         title: 'Bind-Netzwerkschnittstelle',
@@ -7118,7 +7118,7 @@ export default {
       certificate: {
         title: 'TLS-Zertifikat',
         pass: 'Zertifikat bereit. Stellen Sie sicher, dass das Bambuddy-CA-Zertifikat (oben) in den Vertrauensspeicher Ihres Slicers importiert ist.',
-        fail: 'Das TLS-Zertifikat für diesen virtuellen Drucker fehlt. Prüfen Sie, ob das Bambuddy-Datenverzeichnis beschreibbar ist.',
+        fail: 'Das TLS-Zertifikat für diesen virtuellen Drucker fehlt. Prüfen Sie, ob das Druckübersicht-Datenverzeichnis beschreibbar ist.',
       },
     },
   },
@@ -7190,7 +7190,7 @@ export default {
     pollInterval: 'Prüfintervall (Sekunden)',
     pollIntervalHint: 'Wie oft jeder Drucker während eines laufenden Drucks geprüft wird. Minimum 5 s, Maximum 120 s.',
     externalUrlMissing: 'Externe URL ist nicht gesetzt.',
-    externalUrlHint: 'Die ML-API ruft das Kamera-Snapshot per URL ab. Setze die externe URL in den allgemeinen Einstellungen, damit der ML-API-Container Bambuddy erreichen kann.',
+    externalUrlHint: 'Die ML-API ruft das Kamera-Snapshot per URL ab. Setze die externe URL in den allgemeinen Einstellungen, damit der ML-API-Container Druckübersicht erreichen kann.',
     perPrinterTitle: 'Überwachte Drucker',
     perPrinterHint: 'Wähle, welche Drucker vom Erkennungsdienst überwacht werden.',
     monitorAll: 'Alle verbundenen Drucker überwachen',
@@ -7205,14 +7205,14 @@ export default {
 
   makerworld: {
     title: 'MakerWorld',
-    description: 'Füge eine MakerWorld-Modell-URL ein, um es direkt aus Bambuddy zu importieren und zu drucken — ohne die Bambu Handy App zu öffnen.',
+    description: 'Füge eine MakerWorld-Modell-URL ein, um es direkt aus Druckübersicht zu importieren und zu drucken — ohne die Bambu Handy App zu öffnen.',
     pasteUrlHeader: 'Von MakerWorld importieren',
     pasteUrlPlaceholder: 'https://makerworld.com/de/models/… oder beliebigen MakerWorld-Link einfügen',
     resolveButton: 'Laden',
     signInRequiredTitle: 'Bambu-Cloud-Anmeldung für Download erforderlich',
     signInRequiredBody: 'Modell-Details können anonym angezeigt werden, aber MakerWorld verlangt eine Bambu-Cloud-Anmeldung zum Herunterladen der 3MF-Dateien.',
     signInExpiredTitle: 'Bambu-Cloud-Anmeldung abgelaufen',
-    signInExpiredBody: 'Sie sind weiterhin bei Bambuddy angemeldet, aber Bambu Lab akzeptiert das gespeicherte Token nicht mehr, daher schlagen Downloads fehl. Melden Sie sich erneut bei Bambu Cloud an.',
+    signInExpiredBody: 'Sie sind weiterhin bei Druckübersicht angemeldet, aber Bambu Lab akzeptiert das gespeicherte Token nicht mehr, daher schlagen Downloads fehl. Melden Sie sich erneut bei Bambu Cloud an.',
     openCloudSettings: 'Cloud-Einstellungen öffnen',
     untitledModel: 'Unbenanntes Modell',
     byCreator: 'von {{name}}',
@@ -7230,7 +7230,7 @@ export default {
     alsoCompatible: 'Auch kompatibel: {{printers}}',
     importToLibrary: 'Speichern',
     sliceIn: 'Speichern & in {{slicer}} öffnen',
-    disclaimer: 'Die MakerWorld-Integration verwendet von der Community dokumentierte API-Endpunkte. Bambuddy ist nicht mit MakerWorld oder Bambu Lab verbunden oder von diesen unterstützt.',
+    disclaimer: 'Die MakerWorld-Integration verwendet von der Community dokumentierte API-Endpunkte. Druckübersicht ist nicht mit MakerWorld oder Bambu Lab verbunden oder von diesen unterstützt.',
     lastImportSuccess: 'In deine Bibliothek importiert',
     lastImportAlreadyInLibrary: 'Bereits in deiner Bibliothek',
     viewInLibrary: 'Im Dateimanager anzeigen',
@@ -7352,7 +7352,7 @@ export default {
     effect1: 'Passende Dateien werden in den Papierkorb verschoben — noch nicht von der Festplatte gelöscht.',
     effect2: 'Du kannst sie bis zum Ablauf der Aufbewahrungsfrist jederzeit wiederherstellen.',
     effect3: 'Nach Ablauf der Frist löscht der Papierkorb-Sweeper sie endgültig von der Festplatte.',
-    effect4: 'Dateien in externen (verknüpften) Ordnern werden übersprungen — Bambuddy löscht keine Bytes, die ihm nicht gehören.',
+    effect4: 'Dateien in externen (verknüpften) Ordnern werden übersprungen — Druckübersicht löscht keine Bytes, die ihm nicht gehören.',
     previewLoading: 'Prüfe, wie viele Dateien passen…',
     previewFailed: 'Vorschau konnte nicht geladen werden.',
     previewSummary: '{{count}} Dateien · {{size}} würden in den Papierkorb verschoben',

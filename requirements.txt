@@ -168,3 +168,6 @@ httpx>=0.26.0
 ruff>=0.8.0
 
 pillow>=12.2.0
+
+# Fork: Lager-Autodruck (KI-Einschaetzung der Dringlichkeit per Claude)
+anthropic>=1.0.0

@@ -154,7 +154,7 @@ describe('ConnectionDiagnosticModal', () => {
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
     // States the printer refused us, instead of the hedged "most likely wrong"
     // text used when all we know is that there's no session.
-    expect(await screen.findByText(/refused Bambuddy's credentials/i)).toBeInTheDocument();
+    expect(await screen.findByText(/refused Druckübersicht's credentials/i)).toBeInTheDocument();
     expect(screen.queryByText(/most likely wrong/i)).not.toBeInTheDocument();
 
     spy.mockRestore();
@@ -170,7 +170,7 @@ describe('ConnectionDiagnosticModal', () => {
 
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/most likely wrong/i)).toBeInTheDocument();
-    expect(screen.queryByText(/refused Bambuddy's credentials/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/refused Druckübersicht's credentials/i)).not.toBeInTheDocument();
 
     spy.mockRestore();
   });

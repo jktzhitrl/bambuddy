@@ -38,6 +38,7 @@ from backend.app.api.routes import (
     inventory,
     kprofiles,
     labels,
+    lager_autodruck,  # Fork: Lager-Autodruck
     library,
     library_tags,
     library_trash,
@@ -105,6 +106,7 @@ from backend.app.services.energy_plug import energy_plug_candidates, select_ener
 from backend.app.services.github_backup import github_backup_service
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.homeassistant import homeassistant_service
+from backend.app.services.lager_autodruck.service import lager_autodruck_service  # Fork: Lager-Autodruck
 from backend.app.services.library_trash import library_trash_service
 from backend.app.services.local_backup import local_backup_service
 from backend.app.services.location_ha_sensor_manager import location_ha_sensor_manager
@@ -6507,6 +6509,12 @@ async def on_print_complete(printer_id: int, data: dict):
 
         await run_with_retry(_update_queue_status, label="queue status update")
 
+        # Fork: Lager-Autodruck - Job abschliessen und Ergebnis ins Lager melden.
+        spawn_background_task(
+            lager_autodruck_service.bei_druckende(printer_id, data, queue_item_id, archive_id),
+            name="lager-autodruck-druckende",
+        )
+
         # Post-commit side effects (notifications, MQTT relay, auto-off) use
         # their own sessions and have their own error handling — no retry needed.
         if queue_item_id is not None:
@@ -9141,6 +9149,9 @@ async def lifespan(app: FastAPI):
     # Start the print scheduler
     spawn_background_task(print_scheduler.run(), name="print-scheduler")
 
+    # Fork: Lager-Autodruck (Bestand pruefen, Drucke einplanen, Buchungen senden)
+    lager_autodruck_service.start()
+
     # Start the smart plug scheduler for time-based on/off
     smart_plug_manager.start_scheduler()
 
@@ -9229,6 +9240,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     print_scheduler.stop()
+    lager_autodruck_service.stop()
     smart_plug_manager.stop_scheduler()
     ha_sensor_manager.stop()
     location_ha_sensor_manager.stop()
@@ -9765,6 +9777,7 @@ app.include_router(local_backup.router, prefix=app_settings.api_prefix)
 app.include_router(obico.router, prefix=app_settings.api_prefix)
 app.include_router(metrics.router, prefix=app_settings.api_prefix)
 app.include_router(virtual_printers.router, prefix=app_settings.api_prefix)
+app.include_router(lager_autodruck.router, prefix=app_settings.api_prefix)  # Fork: Lager-Autodruck
 app.include_router(spoolbuddy.router, prefix=app_settings.api_prefix)
 
 

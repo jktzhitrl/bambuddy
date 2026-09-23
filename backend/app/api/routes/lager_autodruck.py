@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.routes._url_safety import assert_safe_lan_service_url
 from backend.app.api.routes.library_variants import normalize_model_name
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
 from backend.app.core.database import get_db
@@ -35,7 +36,7 @@ from backend.app.models.lager_autodruck import (
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
-from backend.app.services.lager_autodruck import konfig
+from backend.app.services.lager_autodruck import konfig, nachtruhe
 from backend.app.services.lager_autodruck.service import dateiname_aus_archiv, lager_autodruck_service
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import utcnow_naive
@@ -45,6 +46,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/lager-autodruck", tags=["lager-autodruck"])
 
 _GEHEIM_PLATZHALTER = "********"
+
+
+def _iso(zeit) -> str | None:
+    return zeit.isoformat() + "Z" if zeit else None
 
 
 # --- Einstellungen -------------------------------------------------------------
@@ -62,6 +67,10 @@ class KonfigDaten(BaseModel):
     ki_modell: str = ""
     intervall_minuten: int = Field(5, ge=1, le=1440)
     alle_drucke_verbuchen: bool = True
+    nachtruhe_aktiv: bool = True
+    schlafen: str = "22:00"
+    aufstehen: str = "07:00"
+    puffer_minuten: int = Field(15, ge=0, le=240)
 
 
 def _konfig_antwort(k: konfig.Konfig) -> dict:
@@ -87,6 +96,14 @@ async def konfig_speichern(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_UPDATE),
 ):
     alt = await konfig.laden(db)
+    if daten.supabase_url.strip():
+        try:
+            assert_safe_lan_service_url(daten.supabase_url.strip(), label="Supabase-Adresse")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+    for feld in ("schlafen", "aufstehen"):
+        if nachtruhe.uhrzeit(getattr(daten, feld)) is None:
+            raise HTTPException(400, "Uhrzeit bitte als HH:MM angeben")
     neu = konfig.Konfig(
         aktiv=daten.aktiv,
         supabase_url=daten.supabase_url.strip().rstrip("/"),
@@ -100,6 +117,10 @@ async def konfig_speichern(
         ki_modell=daten.ki_modell.strip() or alt.ki_modell,
         intervall_minuten=daten.intervall_minuten,
         alle_drucke_verbuchen=daten.alle_drucke_verbuchen,
+        nachtruhe_aktiv=daten.nachtruhe_aktiv,
+        schlafen=nachtruhe.uhrzeit(daten.schlafen).strftime("%H:%M"),
+        aufstehen=nachtruhe.uhrzeit(daten.aufstehen).strftime("%H:%M"),
+        puffer_minuten=daten.puffer_minuten,
     )
     await konfig.speichern(db, neu)
     lager_autodruck_service.aufwecken()
@@ -186,8 +207,6 @@ class RegelDaten(BaseModel):
     target_model: str | None = None
     target_location: str | None = None
     max_drucke_pro_tag: int | None = Field(None, ge=0, le=1000)
-    zeit_von: str | None = None
-    zeit_bis: str | None = None
 
     @field_validator("modus")
     @classmethod
@@ -195,16 +214,6 @@ class RegelDaten(BaseModel):
         if v not in MODI:
             raise ValueError(f"Modus muss einer von {', '.join(MODI)} sein")
         return v
-
-    @field_validator("zeit_von", "zeit_bis")
-    @classmethod
-    def _zeit(cls, v: str | None) -> str | None:
-        if not v:
-            return None
-        teile = v.split(":")
-        if len(teile) != 2 or not all(t.isdigit() for t in teile) or int(teile[0]) > 23 or int(teile[1]) > 59:
-            raise ValueError("Uhrzeit bitte als HH:MM angeben")
-        return f"{int(teile[0]):02d}:{int(teile[1]):02d}"
 
 
 def _regel_antwort(r: LagerDruckRegel) -> dict:
@@ -221,8 +230,6 @@ def _regel_antwort(r: LagerDruckRegel) -> dict:
         "target_model": r.target_model,
         "target_location": r.target_location,
         "max_drucke_pro_tag": r.max_drucke_pro_tag,
-        "zeit_von": r.zeit_von,
-        "zeit_bis": r.zeit_bis,
     }
 
 
@@ -250,8 +257,6 @@ async def _regel_uebernehmen(db: AsyncSession, regel: LagerDruckRegel, daten: Re
     regel.target_model = target_model
     regel.target_location = (daten.target_location or None) if target_model else None
     regel.max_drucke_pro_tag = daten.max_drucke_pro_tag
-    regel.zeit_von = daten.zeit_von
-    regel.zeit_bis = daten.zeit_bis
     # Auch ohne inhaltliche Aenderung: Speichern hebt eine Sperre wegen einer
     # nicht zugeordneten Buchung auf (siehe service._planen).
     regel.updated_at = utcnow_naive()
@@ -381,6 +386,11 @@ async def jobs_lesen(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
 ):
     jobs = (await db.execute(select(LagerDruckJob).order_by(LagerDruckJob.id.desc()).limit(limit))).scalars().all()
+    ids = [j.queue_item_id for j in jobs if j.queue_item_id]
+    items = {}
+    if ids:
+        abfrage = select(PrintQueueItem).where(PrintQueueItem.id.in_(ids))
+        items = {i.id: i for i in (await db.execute(abfrage)).scalars()}
     return [
         {
             "id": j.id,
@@ -395,6 +405,9 @@ async def jobs_lesen(
             "freigegeben_von": j.freigegeben_von,
             "created_at": j.created_at.isoformat() + "Z" if j.created_at else None,
             "finished_at": j.finished_at.isoformat() + "Z" if j.finished_at else None,
+            # Nachtruhe: fruehester Start, falls der Druck zurueckgehalten wird.
+            "geplanter_start": _iso(items[j.queue_item_id].scheduled_time) if j.queue_item_id in items else None,
+            "druckdauer_s": items[j.queue_item_id].print_time_seconds if j.queue_item_id in items else None,
         }
         for j in jobs
     ]
@@ -420,8 +433,11 @@ async def job_freigeben(
     item.manual_start = False
     job.status = JOB_GEPLANT
     job.freigegeben_von = benutzer.username if benutzer else "Oberflaeche"
+    # Auch ein freigegebener Druck soll nicht in der Nacht fertig werden.
+    lager_autodruck_service.nachtruhe_fuer_item(await konfig.laden(db), item, utcnow_naive())
     await db.commit()
-    return {"ok": True}
+    lager_autodruck_service.aufwecken()
+    return {"ok": True, "geplanter_start": _iso(item.scheduled_time)}
 
 
 @router.post("/jobs/{job_id}/verwerfen")

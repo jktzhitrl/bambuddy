@@ -18,6 +18,7 @@ from backend.app.core.db_dialect import upsert_setting
 from backend.app.core.encryption import mfa_decrypt, mfa_encrypt
 from backend.app.models.settings import Settings
 from backend.app.services.lager_autodruck.ki import STANDARD_MODELL
+from backend.app.services.lager_autodruck.nachtruhe import Nachtruhe
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,17 @@ class Konfig:
     # Auch Drucke, die nicht vom Autodruck kommen (von Hand gestartet), ins
     # Lager melden - ersetzt den frueheren "Druck fertig"-Webhook.
     alle_drucke_verbuchen: bool = True
+    # Nachtruhe: kein Autodruck soll zwischen Schlafengehen und Aufstehen
+    # fertig werden (Ortszeit, "HH:MM"). Puffer fuer Aufheizen/Abweichung.
+    nachtruhe_aktiv: bool = True
+    schlafen: str = "22:00"
+    aufstehen: str = "07:00"
+    puffer_minuten: int = 15
+
+    def nachtruhe(self) -> Nachtruhe | None:
+        if not self.nachtruhe_aktiv:
+            return None
+        return Nachtruhe.aus_text(self.schlafen, self.aufstehen, self.puffer_minuten)
 
     @property
     def eingerichtet(self) -> bool:

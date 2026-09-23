@@ -591,6 +591,8 @@ GUARDED_BODY_URLS = {
     ("SmartPlugUpdate", "rest_status_url"),
     ("SmartPlugUpdate", "rest_power_url"),
     ("SmartPlugUpdate", "rest_energy_url"),
+    # Fork: Lager-Autodruck - LAN-Stufe beim Speichern und in LagerClient.
+    ("KonfigDaten", "supabase_url"),
 }
 
 # Not a destination Bambuddy requests — no guard applies.

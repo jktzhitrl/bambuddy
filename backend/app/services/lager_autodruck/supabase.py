@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from backend.app.api.routes._url_safety import assert_safe_lan_service_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,6 +26,13 @@ class LagerFehler(Exception):
 class LagerClient:
     def __init__(self, url: str, anon_key: str, email: str, passwort: str, *, timeout: float = 20.0):
         self._basis = url.rstrip("/")
+        # Gleiche URL-Pruefung wie Bambuddys andere LAN-Dienste (kein file://,
+        # keine Cloud-Metadaten-Adressen ...). Fehler erst beim Zugriff melden.
+        try:
+            assert_safe_lan_service_url(self._basis, label="Supabase-Adresse")
+            self._url_fehler: str | None = None
+        except ValueError as e:
+            self._url_fehler = str(e)
         self._anon_key = anon_key
         self._email = email
         self._passwort = passwort
@@ -38,6 +47,8 @@ class LagerClient:
         return httpx.AsyncClient(timeout=self._timeout, transport=self.transport)
 
     async def _anmelden(self) -> None:
+        if self._url_fehler:
+            raise LagerFehler(self._url_fehler)
         # Gueltiges Token noch mindestens eine Minute? Dann nichts tun.
         if self._access_token and time.monotonic() < self._laeuft_ab - 60:
             return

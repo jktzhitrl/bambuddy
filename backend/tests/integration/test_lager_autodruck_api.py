@@ -25,6 +25,7 @@ async def test_konfig_verraet_keine_geheimnisse(async_client):
     daten = (await async_client.get(f"{BASIS}/konfig")).json()
     assert daten["passwort"] == "********" and daten["anthropic_api_key"] == "********"
     assert daten["supabase_url"] == "https://lager.example"
+    assert daten["nachtruhe_aktiv"] is True and daten["schlafen"] == "22:00"
     assert daten["eingerichtet"] is True
 
     # Platzhalter zuruecksenden laesst das Passwort unveraendert.
@@ -60,14 +61,11 @@ async def test_regel_anlegen_aendern_loeschen(async_client, db_session, printer_
             "stueck_je_druck": 4,
             "modus": "freigabe",
             "printer_id": drucker.id,
-            "zeit_von": "7:00",
-            "zeit_bis": "22:00",
         },
     )
     assert antwort.status_code == 200, antwort.text
     regel = antwort.json()
     assert regel["dateiname"] == "Halter"  # aus dem Archiv uebernommen
-    assert regel["zeit_von"] == "07:00"
     assert regel["warnung"]  # Lager noch nicht verbunden
 
     doppelt = await async_client.post(f"{BASIS}/regeln", json={"part_id": "teil-1", "archive_id": archiv.id})
@@ -116,3 +114,10 @@ async def test_status_ohne_einrichtung(async_client):
     daten = (await async_client.get(f"{BASIS}/status")).json()
     assert daten["eingerichtet"] is False and daten["offene_buchungen"] == 0
     assert (await async_client.post(f"{BASIS}/pruefen")).json()["ergebnis"] == "nicht eingerichtet"
+
+
+async def test_konfig_lehnt_gefaehrliche_adresse_und_falsche_uhrzeit_ab(async_client):
+    antwort = await async_client.put(f"{BASIS}/konfig", json={"supabase_url": "http://169.254.169.254/"})
+    assert antwort.status_code == 400
+    antwort = await async_client.put(f"{BASIS}/konfig", json={"schlafen": "25:00"})
+    assert antwort.status_code == 400

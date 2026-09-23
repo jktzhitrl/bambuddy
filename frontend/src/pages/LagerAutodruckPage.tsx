@@ -46,6 +46,12 @@ function zeit(iso: string | null | undefined) {
   return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function dauer(sekunden: number) {
+  const h = Math.floor(sekunden / 3600);
+  const m = Math.round((sekunden % 3600) / 60);
+  return h ? `${h} h ${m} min` : `${m} min`;
+}
+
 function zahl(n: number | null | undefined) {
   return n === null || n === undefined ? '–' : n.toLocaleString('de-DE');
 }
@@ -117,7 +123,12 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
   });
   const freigeben = useMutation({
     mutationFn: lagerAutodruckApi.jobFreigeben,
-    onSuccess: () => { showToast('Freigegeben - startet, sobald ein Drucker frei ist'); neuLaden(); },
+    onSuccess: (e) => {
+      showToast(e.geplanter_start
+        ? `Freigegeben - wegen Nachtruhe Start frühestens ${zeit(e.geplanter_start)}`
+        : 'Freigegeben - startet, sobald ein Drucker frei ist');
+      neuLaden();
+    },
     onError: (e: Error) => showToast(e.message, 'error'),
   });
   const verwerfen = useMutation({
@@ -251,7 +262,13 @@ function JobBeschreibung({ job }: { job: Job }) {
         {job.freigegeben_von && <> · freigegeben von {job.freigegeben_von}</>}
         {job.finished_at && <> · beendet {zeit(job.finished_at)}</>}
         {job.queue_item_id && <> · Warteschlange #{job.queue_item_id}</>}
+        {job.druckdauer_s ? <> · Druckdauer {dauer(job.druckdauer_s)}</> : null}
       </div>
+      {job.geplanter_start && new Date(job.geplanter_start) > new Date() && ['geplant', 'wartet_auf_freigabe'].includes(job.status) && (
+        <div className="text-xs text-blue-300">
+          Nachtruhe: startet frühestens {zeit(job.geplanter_start)}, damit er nicht in der Nacht fertig wird
+        </div>
+      )}
     </div>
   );
 }
@@ -270,8 +287,6 @@ const LEERE_REGEL: Regel = {
   target_model: null,
   target_location: null,
   max_drucke_pro_tag: null,
-  zeit_von: null,
-  zeit_bis: null,
 };
 
 function Regeln({ darfAendern }: { darfAendern: boolean }) {
@@ -326,8 +341,6 @@ function Regeln({ darfAendern }: { darfAendern: boolean }) {
                 </div>
                 <div className="text-xs text-bambu-gray">
                   {r.max_drucke_pro_tag !== null ? `max. ${r.max_drucke_pro_tag} Drucke/Tag` : 'kein Tageslimit'}
-                  {' · '}
-                  {r.zeit_von && r.zeit_bis ? `startet nur ${r.zeit_von}–${r.zeit_bis} Uhr` : 'jederzeit'}
                 </div>
               </div>
               {darfAendern && (
@@ -516,16 +529,13 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
           )}
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4">
-          <Feld titel="Höchstens Drucke pro Tag" hilfe="Leer = kein Limit">
+        <div className="grid md:grid-cols-2 gap-4">
+          <Feld titel="Höchstens Drucke pro Tag" hilfe="Leer = kein Limit. Wann gestartet wird, regelt die Nachtruhe in den Einstellungen.">
             <input type="number" min={0} className={EINGABE} value={r.max_drucke_pro_tag ?? ''} onChange={e => setze('max_drucke_pro_tag', e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} />
           </Feld>
-          <Feld titel="Starten ab" hilfe="Leer = jederzeit">
-            <input type="time" className={EINGABE} value={r.zeit_von ?? ''} onChange={e => setze('zeit_von', e.target.value || null)} />
-          </Feld>
-          <Feld titel="Starten bis">
-            <input type="time" className={EINGABE} value={r.zeit_bis ?? ''} onChange={e => setze('zeit_bis', e.target.value || null)} />
-          </Feld>
+          {gewaehltesArchiv?.druckzeit_s ? (
+            <div className="text-sm text-bambu-gray self-center">Druckdauer laut Datei: {dauer(gewaehltesArchiv.druckzeit_s)}</div>
+          ) : null}
         </div>
 
         <div className="flex gap-2 justify-end">
@@ -666,6 +676,33 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
           <Feld titel="Bestand prüfen alle … Minuten">
             <input type="number" min={1} className={EINGABE} value={k.intervall_minuten} disabled={!darfAendern} onChange={e => setze('intervall_minuten', Math.max(1, Number(e.target.value) || 1))} />
           </Feld>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h2 className="text-white font-semibold">Nachtruhe</h2>
+          <p className="text-xs text-bambu-gray mt-1">
+            Automatische Drucke werden so gestartet, dass sie vor dem Schlafengehen oder nach dem Aufstehen fertig sind – nie mitten in der Nacht.
+            Würde ein Druck in der Nacht fertig, startet er später, sodass er zur Aufstehzeit fertig ist. Die Druckdauer kommt aus der Druckdatei.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-white font-medium">Nachtruhe beachten</div>
+            <Toggle checked={k.nachtruhe_aktiv} onChange={v => setze('nachtruhe_aktiv', v)} disabled={!darfAendern} />
+          </div>
+          <div className="grid md:grid-cols-3 gap-4">
+            <Feld titel="Schlafen gehen">
+              <input type="time" className={EINGABE} value={k.schlafen} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('schlafen', e.target.value)} />
+            </Feld>
+            <Feld titel="Aufstehen">
+              <input type="time" className={EINGABE} value={k.aufstehen} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('aufstehen', e.target.value)} />
+            </Feld>
+            <Feld titel="Puffer (Minuten)" hilfe="Für Aufheizen und falls der Druck länger dauert als geschätzt">
+              <input type="number" min={0} className={EINGABE} value={k.puffer_minuten} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('puffer_minuten', Math.max(0, Number(e.target.value) || 0))} />
+            </Feld>
+          </div>
         </CardContent>
       </Card>
 

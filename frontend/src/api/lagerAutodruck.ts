@@ -41,6 +41,10 @@ export interface Konfig {
   ki_modell: string;
   intervall_minuten: number;
   alle_drucke_verbuchen: boolean;
+  nachtruhe_aktiv: boolean;
+  schlafen: string;
+  aufstehen: string;
+  puffer_minuten: number;
   eingerichtet?: boolean;
 }
 
@@ -57,8 +61,6 @@ export interface Regel {
   target_model: string | null;
   target_location: string | null;
   max_drucke_pro_tag: number | null;
-  zeit_von: string | null;
-  zeit_bis: string | null;
   warnung?: string | null;
 }
 
@@ -98,6 +100,8 @@ export interface Job {
   freigegeben_von: string | null;
   created_at: string | null;
   finished_at: string | null;
+  geplanter_start: string | null;
+  druckdauer_s: number | null;
 }
 
 export interface Buchung {
@@ -156,7 +160,7 @@ export const lagerAutodruckApi = {
       : anfrage<Regel>('/regeln', { method: 'POST', body: json(r) }),
   regelLoeschen: (id: number) => anfrage<{ ok: boolean }>(`/regeln/${id}`, { method: 'DELETE' }),
   jobs: () => anfrage<Job[]>('/jobs'),
-  jobFreigeben: (id: number) => anfrage<{ ok: boolean }>(`/jobs/${id}/freigeben`, { method: 'POST' }),
+  jobFreigeben: (id: number) => anfrage<{ ok: boolean; geplanter_start: string | null }>(`/jobs/${id}/freigeben`, { method: 'POST' }),
   jobVerwerfen: (id: number) => anfrage<{ ok: boolean }>(`/jobs/${id}/verwerfen`, { method: 'POST' }),
   buchungen: () => anfrage<Buchung[]>('/buchungen'),
   buchungErneut: (id: number) => anfrage<{ ok: boolean }>(`/buchungen/${id}/erneut`, { method: 'POST' }),

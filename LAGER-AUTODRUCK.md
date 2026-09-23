@@ -41,7 +41,15 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
 
   Dazu gehören pro Regel: die Druckdatei aus dem Archiv, Stück pro Druck, ein
   fester Drucker oder „irgendein freier Drucker vom Modell X“ (optional
-  Standort), höchstens N Drucke pro Tag und ein Zeitfenster.
+  Standort) und höchstens N Drucke pro Tag.
+- **Nachtruhe** (Einstellungen, gilt für alle Regeln): Kein automatischer Druck
+  soll zwischen Schlafengehen und Aufstehen fertig werden. Aus der Druckdauer
+  laut Druckdatei plus Puffer wird das Ende berechnet. Fiele es in die Nacht,
+  startet der Druck später, sodass er genau zur Aufstehzeit fertig ist.
+  Geprüft wird laufend und genau zu dem Zeitpunkt, ab dem ein wartender Druck
+  nicht mehr rechtzeitig fertig würde. Auch wenn ein Drucker erst spät frei
+  wird, rutscht der Druck so nicht in die Nacht. Ein Druck, der über die
+  Bambuddy-Warteschlange von Hand mit **Start** gestartet wird, läuft sofort.
 - **Freigeben**: Aufträge, die eine Freigabe brauchen, stehen mit „manueller
   Start“ in der Bambuddy-Warteschlange. Freigeben geht über **Start** in der
   Warteschlange oder über **Freigeben** auf der Seite „Lager-Autodruck“.
@@ -65,6 +73,7 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
      eintragen. Das sind dieselben Werte wie bisher `DRUCK_SUPABASE_*` in Vercel.
    - Optional: Anthropic-API-Schlüssel eintragen und „KI-Einschätzung verwenden“
      einschalten. Ohne das gelten die festen Regeln, kostenlos.
+   - Nachtruhe prüfen (Standard 22:00–07:00, 15 Minuten Puffer).
    - **Speichern**, dann **Verbindung testen**.
 3. Unter **Regeln je Teil** für jedes Teil eine Regel anlegen. Beim Speichern
    legt Bambuddy im Lager die passende `druck_zuordnung` an.
@@ -95,6 +104,8 @@ Im bestehenden Code sind nur wenige Zeilen ergänzt, alle mit
 - `requirements.txt`: `anthropic`
 - `frontend/src/__tests__/pages/SettingsPage.test.tsx`: Menüpunkt in der
   erwarteten Reihenfolge
+- `backend/tests/unit/test_outbound_url_ssrf_guards.py`: Supabase-Adresse als
+  geprüfte URL eingetragen
 
 Update einspielen:
 

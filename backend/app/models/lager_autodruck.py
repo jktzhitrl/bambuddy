@@ -66,11 +66,9 @@ class LagerDruckRegel(Base):
     target_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
     target_location: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # Grenzen: hoechstens so viele neue Druckauftraege pro Tag, und nur in
-    # diesem Zeitfenster starten ("HH:MM", Ortszeit; leer = immer).
+    # Hoechstens so viele neue Druckauftraege pro Tag (leer = kein Limit).
+    # Wann gestartet wird, regelt die Nachtruhe in den Einstellungen.
     max_drucke_pro_tag: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    zeit_von: Mapped[str | None] = mapped_column(String(5), nullable=True)
-    zeit_bis: Mapped[str | None] = mapped_column(String(5), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

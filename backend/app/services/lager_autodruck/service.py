@@ -20,7 +20,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,9 +49,9 @@ from backend.app.models.lager_autodruck import (
 )
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lager_autodruck import bedarf, ki, konfig
+from backend.app.services.lager_autodruck import bedarf, ki, konfig, nachtruhe
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
-from backend.app.utils.local_time import local_day_start, local_zone, utcnow_naive
+from backend.app.utils.local_time import local_day_start, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -82,36 +82,6 @@ def dateiname_aus_archiv(archiv: PrintArchive) -> str:
     return (archiv.print_name or "").strip() or dateiname_aus_druck(None, archiv.filename)
 
 
-def _uhrzeit(text: str | None) -> time | None:
-    if not text:
-        return None
-    try:
-        stunde, minute = text.split(":")
-        return time(int(stunde), int(minute))
-    except ValueError:
-        return None
-
-
-def startzeit(zeit_von: str | None, zeit_bis: str | None, jetzt_utc: datetime) -> datetime | None:
-    """None = sofort erlaubt; sonst naechster Fensterbeginn als naive UTC-Zeit."""
-    von, bis = _uhrzeit(zeit_von), _uhrzeit(zeit_bis)
-    if von is None or bis is None or von == bis:
-        return None
-    zone = local_zone()
-    lokal = jetzt_utc.replace(tzinfo=timezone.utc).astimezone(zone)
-    jetzt = lokal.time()
-    if von < bis:
-        im_fenster = von <= jetzt < bis
-    else:  # ueber Mitternacht, z.B. 22:00-06:00
-        im_fenster = jetzt >= von or jetzt < bis
-    if im_fenster:
-        return None
-    beginn = datetime.combine(lokal.date(), von, tzinfo=zone)
-    if beginn <= lokal:
-        beginn += timedelta(days=1)
-    return beginn.astimezone(timezone.utc).replace(tzinfo=None)
-
-
 class LagerAutodruckService:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
@@ -127,6 +97,9 @@ class LagerAutodruckService:
         self.letztes_ergebnis: dict | None = None
         self.letzter_fehler: str | None = None
         self.uebersicht: list[dict] = []
+        # Frueheste Zeit, zu der ein startbereiter Druck wegen der Nachtruhe
+        # zurueckgehalten werden muss - die Schleife wacht dann genau auf.
+        self.naechste_grenze: datetime | None = None
 
     # --- Lebenszyklus -----------------------------------------------------
 
@@ -159,8 +132,12 @@ class LagerAutodruckService:
             except Exception as e:  # noqa: BLE001 - die Schleife darf nie sterben
                 logger.exception("Lager-Autodruck: Durchlauf fehlgeschlagen")
                 self.letzter_fehler = str(e)
+            warten = intervall * 60.0
+            if self.naechste_grenze is not None:
+                bis_grenze = (self.naechste_grenze - utcnow_naive()).total_seconds() + 1
+                warten = max(1.0, min(warten, bis_grenze))
             try:
-                await asyncio.wait_for(self._aufwecken.wait(), timeout=intervall * 60)
+                await asyncio.wait_for(self._aufwecken.wait(), timeout=warten)
             except asyncio.TimeoutError:
                 pass
             self._aufwecken.clear()
@@ -183,6 +160,7 @@ class LagerAutodruckService:
                 lager = self.lager_client(k)
 
                 await self.jobs_abgleichen(db)
+                await self.nachtruhe_anwenden(db, k)
                 gesendet = await self.buchungen_senden(db, lager)
 
                 if not k.aktiv:
@@ -332,7 +310,6 @@ class LagerAutodruckService:
                 if not target_model:
                     logger.warning("Lager-Autodruck: Regel %s hat weder Drucker noch Druckermodell", regel.id)
                     continue
-            geplant_ab = startzeit(regel.zeit_von, regel.zeit_bis, jetzt)
 
             for _ in range(c.druecke):
                 item = await self._in_warteschlange(
@@ -342,8 +319,10 @@ class LagerAutodruckService:
                     target_model=None if regel.printer_id else target_model,
                     manueller_start=not ohne_freigabe,
                     vorziehen=dringlichkeit == "hoch",
-                    geplant_ab=geplant_ab,
                 )
+                # Noch vor dem Commit, sonst koennte die Warteschlange den Druck
+                # starten, bevor die Nachtruhe geprueft ist.
+                self.nachtruhe_fuer_item(k, item, jetzt)
                 db.add(
                     LagerDruckJob(
                         regel_id=regel.id,
@@ -367,6 +346,7 @@ class LagerAutodruckService:
                 "startet automatisch" if ohne_freigabe else "wartet auf Freigabe",
             )
         await db.commit()
+        await self.nachtruhe_anwenden(db, k)
         return {"ergebnis": "ok", "angelegt": angelegt, "wartet_auf_freigabe": wartet, "regeln": len(regeln)}
 
     async def _in_warteschlange(
@@ -378,7 +358,6 @@ class LagerAutodruckService:
         target_model: str | None,
         manueller_start: bool,
         vorziehen: bool,
-        geplant_ab: datetime | None,
     ) -> PrintQueueItem:
         # Gleiche Positionslogik wie beim Anlegen ueber die Warteschlange:
         # je Drucker, bzw. gemeinsam fuer alle nicht zugewiesenen Eintraege.
@@ -400,7 +379,6 @@ class LagerAutodruckService:
             archive_id=archiv.id,
             plate_id=regel.plate_id,
             position=position,
-            scheduled_time=geplant_ab,
             manual_start=manueller_start,
             status="pending",
             print_time_seconds=archiv.print_time_seconds,
@@ -408,6 +386,44 @@ class LagerAutodruckService:
         db.add(item)
         await db.flush()
         return item
+
+    # --- Nachtruhe -----------------------------------------------------------
+
+    def nachtruhe_fuer_item(self, k: konfig.Konfig, item: PrintQueueItem, jetzt: datetime) -> datetime | None:
+        """Startzeit eines startbereiten Drucks an die Nachtruhe anpassen.
+
+        Liefert die Grenze, ab der ein jetzt erlaubter Start nicht mehr erlaubt waere.
+        """
+        ruhe = k.nachtruhe()
+        if ruhe is None or not item.print_time_seconds:
+            # Ohne Nachtruhe oder ohne bekannte Druckdauer: nicht zurueckhalten.
+            item.scheduled_time = None
+            return None
+        dauer = timedelta(seconds=item.print_time_seconds)
+        item.scheduled_time = nachtruhe.fruehester_start(ruhe, jetzt, dauer)
+        if item.scheduled_time is None:
+            return nachtruhe.naechste_grenze(ruhe, jetzt, dauer)
+        return None
+
+    async def nachtruhe_anwenden(self, db: AsyncSession, k: konfig.Konfig) -> None:
+        """Alle eigenen, startbereiten Drucke pruefen.
+
+        Laeuft bei jedem Durchlauf und genau an der naechsten Grenze - ein Druck,
+        der wegen eines belegten Druckers spaeter startet als gedacht, soll
+        trotzdem nicht in der Nacht fertig werden.
+        """
+        jetzt = utcnow_naive()
+        grenzen = []
+        jobs = (await db.execute(select(LagerDruckJob).where(LagerDruckJob.status == JOB_GEPLANT))).scalars().all()
+        for job in jobs:
+            item = await db.get(PrintQueueItem, job.queue_item_id) if job.queue_item_id else None
+            if item is None or item.status != "pending" or item.manual_start:
+                continue
+            grenze = self.nachtruhe_fuer_item(k, item, jetzt)
+            if grenze is not None:
+                grenzen.append(grenze)
+        self.naechste_grenze = min(grenzen) if grenzen else None
+        await db.commit()
 
     # --- Abgleich mit der Warteschlange ------------------------------------
 

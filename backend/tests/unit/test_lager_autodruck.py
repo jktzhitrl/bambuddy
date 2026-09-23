@@ -1,6 +1,6 @@
 """Tests fuer das Fork-Modul Lager-Autodruck."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -26,11 +26,10 @@ from backend.app.models.lager_autodruck import (
     LagerDruckRegel,
 )
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.lager_autodruck import bedarf, konfig
+from backend.app.services.lager_autodruck import bedarf, konfig, nachtruhe
 from backend.app.services.lager_autodruck.service import (
     LagerAutodruckService,
     dateiname_aus_druck,
-    startzeit,
 )
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 
@@ -131,19 +130,54 @@ def utc(monkeypatch):
     monkeypatch.setenv("TZ", "UTC")
 
 
-def test_startzeit_im_fenster_sofort(utc):
-    assert startzeit("07:00", "22:00", datetime(2026, 9, 23, 12, 0)) is None
-    assert startzeit(None, None, datetime(2026, 9, 23, 3, 0)) is None
+def _ruhe(puffer=0):
+    return nachtruhe.Nachtruhe.aus_text("22:00", "07:00", puffer)
 
 
-def test_startzeit_vor_und_nach_dem_fenster(utc):
-    assert startzeit("07:00", "22:00", datetime(2026, 9, 23, 5, 0)) == datetime(2026, 9, 23, 7, 0)
-    assert startzeit("07:00", "22:00", datetime(2026, 9, 23, 23, 0)) == datetime(2026, 9, 24, 7, 0)
+def test_nachtruhe_kurzer_druck_vor_dem_schlafen(utc):
+    # 18:00 + 3h = 21:00 -> fertig vor 22:00
+    assert nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 18, 0), timedelta(hours=3)) is None
 
 
-def test_startzeit_fenster_ueber_mitternacht(utc):
-    assert startzeit("22:00", "06:00", datetime(2026, 9, 23, 2, 0)) is None
-    assert startzeit("22:00", "06:00", datetime(2026, 9, 23, 12, 0)) == datetime(2026, 9, 23, 22, 0)
+def test_nachtruhe_verschiebt_bis_fertig_zum_aufstehen(utc):
+    # 20:00 + 10h = 06:00 -> mitten in der Nacht; Start 21:00, fertig 07:00
+    start = nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 20, 0), timedelta(hours=10))
+    assert start == datetime(2026, 9, 23, 21, 0)
+
+
+def test_nachtruhe_puffer_zaehlt_mit(utc):
+    # 19:00 + 3h = 22:00 waere knapp ok, mit 15 Min Puffer nicht mehr -> fertig 07:00
+    start = nachtruhe.fruehester_start(_ruhe(15), datetime(2026, 9, 23, 19, 0), timedelta(hours=3))
+    assert start == datetime(2026, 9, 24, 3, 45)
+
+
+def test_nachtruhe_nachts_eingeplant_endet_nach_dem_aufstehen(utc):
+    # 23:00 + 2h = 01:00 -> verschieben auf Start 05:00, fertig 07:00
+    start = nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 23, 0), timedelta(hours=2))
+    assert start == datetime(2026, 9, 24, 5, 0)
+    # 23:00 + 9h = 08:00 -> nach dem Aufstehen, darf sofort
+    assert nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 23, 0), timedelta(hours=9)) is None
+
+
+def test_nachtruhe_sehr_langer_druck(utc):
+    # 30h-Druck um 12:00 endet 18:00 am Folgetag -> erlaubt
+    assert nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 12, 0), timedelta(hours=30)) is None
+    # 30h-Druck um 20:00 endet 02:00 uebermorgen -> fertig 07:00 statt dessen
+    start = nachtruhe.fruehester_start(_ruhe(), datetime(2026, 9, 23, 20, 0), timedelta(hours=30))
+    assert start == datetime(2026, 9, 24, 1, 0)
+
+
+def test_nachtruhe_grenze(utc):
+    # 3h-Druck um 12:00: darf bis 19:00 starten (fertig 22:00)
+    assert nachtruhe.naechste_grenze(_ruhe(), datetime(2026, 9, 23, 12, 0), timedelta(hours=3)) == datetime(
+        2026, 9, 23, 19, 0
+    )
+
+
+def test_nachtruhe_ungueltig_oder_aus():
+    assert nachtruhe.Nachtruhe.aus_text("22:00", "22:00", 0) is None
+    assert nachtruhe.Nachtruhe.aus_text("abc", "07:00", 0) is None
+    assert konfig.Konfig(nachtruhe_aktiv=False).nachtruhe() is None
 
 
 # --- Supabase-Zugang ------------------------------------------------------------------
@@ -216,7 +250,9 @@ async def umgebung(test_engine, db_session, printer_factory, monkeypatch):
     await db_session.commit()
     await konfig.speichern(
         db_session,
-        konfig.Konfig(aktiv=True, supabase_url="https://x", supabase_anon_key="a", email="e", passwort="p"),
+        konfig.Konfig(
+            aktiv=True, supabase_url="https://x", supabase_anon_key="a", email="e", passwort="p", nachtruhe_aktiv=False
+        ),
     )
 
     service = LagerAutodruckService()
@@ -459,3 +495,39 @@ async def test_konfig_verschluesselt_geheimnisse(db_session):
     await konfig.speichern(db_session, konfig.Konfig(passwort="geheim", anthropic_api_key="sk-test"))
     geladen = await konfig.laden(db_session)
     assert geladen.passwort == "geheim" and geladen.anthropic_api_key == "sk-test"
+
+
+async def test_nachtruhe_haelt_langen_druck_zurueck(umgebung, db_session, utc):
+    service, lager, drucker, archiv, sessions = umgebung
+    await konfig.speichern(
+        db_session,
+        konfig.Konfig(
+            aktiv=True,
+            supabase_url="https://x",
+            supabase_anon_key="a",
+            email="e",
+            passwort="p",
+            nachtruhe_aktiv=True,
+            schlafen="22:00",
+            aufstehen="07:00",
+            puffer_minuten=0,
+        ),
+    )
+    async with sessions() as db:
+        (await db.get(PrintArchive, archiv.id)).print_time_seconds = 10 * 3600
+        await db.commit()
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+
+    with patch("backend.app.services.lager_autodruck.service.utcnow_naive", return_value=datetime(2026, 9, 23, 20, 0)):
+        await service.durchlauf()
+    (item,) = await _alle(sessions, PrintQueueItem)
+    # 20:00 + 10h waere 06:00 -> Start 21:00, fertig 07:00
+    assert item.scheduled_time == datetime(2026, 9, 23, 21, 0)
+    assert service.naechste_grenze is None
+
+    # Morgens um 10 darf derselbe Druck sofort (fertig 20:00); Grenze 12:00.
+    with patch("backend.app.services.lager_autodruck.service.utcnow_naive", return_value=datetime(2026, 9, 24, 10, 0)):
+        await service.durchlauf()
+    (item,) = await _alle(sessions, PrintQueueItem)
+    assert item.scheduled_time is None
+    assert service.naechste_grenze == datetime(2026, 9, 24, 12, 0)

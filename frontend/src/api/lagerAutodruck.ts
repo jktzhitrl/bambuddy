@@ -77,6 +77,7 @@ export interface UebersichtZeile {
   in_arbeit: number;
   hinweis: string | null;
   termin: string | null;
+  gesperrt: number;
 }
 
 export interface VorschauZeile {

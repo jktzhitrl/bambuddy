@@ -1196,3 +1196,41 @@ async def test_packliste_fehler_haelt_durchlauf_nicht_auf(umgebung):
     lager.lade_packdaten = kaputt
     ergebnis = await service.durchlauf()
     assert ergebnis["ergebnis"] != "Fehler"
+
+
+# --- Gesperrte Lagerorte ---------------------------------------------------------
+
+
+def test_gesperrte_lagerorte_zaehlen_nicht_als_bestand():
+    daten = _daten(
+        [{"id": "a", "name": "A", "bestand": 10, "mindestbestand": 5}, {"id": "set", "bestand": 2}],
+        komponenten=[{"part_id": "set", "komponente_id": "a", "menge": 1}],
+        auftraege=[{"id": "o"}],
+        positionen=[{"order_id": "o", "part_id": "set", "menge": 2}],
+    )
+    daten["gesperrt"] = [{"part_id": "a", "menge": 4}, {"part_id": "a", "menge": 2}, {"part_id": "set", "menge": 2}]
+    # Die 2 fertigen Sets sind gesperrt -> 2x "a" werden gebraucht.
+    assert bedarf.nachfrage_je_teil(daten) == {"a": 2}
+    (k,), (u, _) = bedarf.berechne(daten, [_regel("a"), bedarf.RegelEingabe(2, "set", 1)], {})
+    # 10 - 6 gesperrt = 4 verfuegbar, minus 2 Bedarf = 2 <= 5 -> auf 10 auffuellen = 8
+    assert (k.bestand, k.verfuegbar, k.stueck) == (4, 2, 8)
+    assert (u.bestand, u.gesperrt) == (4, 6)
+
+
+def test_packliste_nimmt_nichts_aus_gesperrten_orten():
+    from backend.app.services.lager_autodruck import packliste
+
+    daten = _packdaten(
+        lagerorte=[
+            {"part_id": "halter", "ort": "Dachboden", "menge": 2},
+            {"part_id": "halter", "ort": "Garage", "menge": 3, "gesperrt": True},
+        ],
+        auftraege=[{"id": "a", "kunde": "A", "status": "Offen"}, {"id": "b", "kunde": "B", "status": "Offen"}],
+        positionen=[
+            {"order_id": "a", "part_id": "halter", "menge": 2},
+            {"order_id": "b", "part_id": "halter", "menge": 1},
+        ],
+    )
+    # 5 Halter, 3 davon gesperrt: nur "A" geht auf, und die Garage wird nicht genannt.
+    (p,) = packliste.packbare_auftraege(daten)
+    assert p.kunde == "A" and p.positionen[0].orte == ["Dachboden (2)"]

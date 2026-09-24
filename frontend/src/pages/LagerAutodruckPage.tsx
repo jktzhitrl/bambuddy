@@ -271,7 +271,10 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
                   return (
                     <tr key={z.regel_id} className="border-t border-bambu-dark-tertiary">
                       <td className="py-2 pr-4 text-white">{z.name ?? z.part_id}</td>
-                      <td className={`py-2 pr-4 text-right ${knapp ? 'text-yellow-400' : 'text-white'}`}>{zahl(z.bestand)}</td>
+                      <td className={`py-2 pr-4 text-right ${knapp ? 'text-yellow-400' : 'text-white'}`}>
+                        {zahl(z.bestand)}
+                        {z.gesperrt > 0 && <span className="text-bambu-gray" title="In gesperrten Lagerorten – zählt nicht als verfügbar"> (+{zahl(z.gesperrt)} 🔒)</span>}
+                      </td>
                       <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.mindestbestand)}</td>
                       <td className="py-2 pr-4 text-right text-blue-400">{zahl(z.in_arbeit)}</td>
                       <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.nachfrage)}</td>

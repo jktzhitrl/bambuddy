@@ -43,6 +43,11 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   *niedrig*. Optional (Schalter „KI-Einschätzung verwenden“, standardmäßig
   aus) bewertet stattdessen Claude, mit Begründung; das kostet pro Aufruf
   etwas über den eigenen Anthropic-Schlüssel.
+- **Gesperrte Lagerorte**: In der Lagersoftware kann jeder Lagerort eines Teils
+  gesperrt werden (Schloss im Teile-Formular). Diese Menge zählt nicht als
+  verfügbar: Die Übersicht zeigt sie als „(+6 🔒)“ neben dem Bestand, der
+  Autodruck rechnet ohne sie (es wird also nachgedruckt, als läge sie nicht da),
+  und die Packliste nimmt nichts daraus und nennt den Ort nicht.
 - **Liefertermine**: Hat ein Auftrag im Lager ein „Versand bis“, zählt je Teil
   der früheste Termin, für den das Teil noch fehlt (fertige Sets gehen zuerst an
   die Aufträge mit dem frühesten Termin). Reichen Bestand und laufende Drucke

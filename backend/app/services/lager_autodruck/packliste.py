@@ -44,18 +44,28 @@ class Packliste:
 
 
 def _orte(eintraege: list[dict], fallback: str | None) -> list[str]:
-    """Lagerorte mit Bestand, z.B. ["Regal B3 (12)"]; sonst der alte Einzel-Lagerort."""
-    orte = [
-        f"{e.get('ort')} ({zahl(e.get('menge')):g})" for e in eintraege if e.get("ort") and zahl(e.get("menge")) > 0
+    """Lagerorte mit Bestand, z.B. ["Regal B3 (12)"]; ohne Lagerorte der alte Einzel-Lagerort.
+
+    Gesperrte Orte werden nicht genannt - von dort wird nichts genommen.
+    """
+    if not eintraege:
+        return [str(fallback)] if fallback else []
+    return [
+        f"{e.get('ort')} ({zahl(e.get('menge')):g})"
+        for e in eintraege
+        if e.get("ort") and zahl(e.get("menge")) > 0 and not e.get("gesperrt")
     ]
-    if not orte and fallback:
-        orte = [str(fallback)]
-    return orte
 
 
 def packbare_auftraege(daten: dict[str, list[dict]]) -> list[Packliste]:
     teile = {str(t.get("id")): t for t in daten.get("teile", [])}
-    bestand = {tid: max(0.0, zahl(t.get("bestand"))) for tid, t in teile.items()}
+    # Gesperrte Lagerorte bleiben unangetastet - nur der Rest ist verfuegbar.
+    gesperrt: dict[str, float] = {}
+    for ort in daten.get("lagerorte", []):
+        if ort.get("gesperrt"):
+            tid = str(ort.get("part_id"))
+            gesperrt[tid] = gesperrt.get(tid, 0.0) + max(0.0, zahl(ort.get("menge")))
+    bestand = {tid: max(0.0, zahl(t.get("bestand")) - gesperrt.get(tid, 0.0)) for tid, t in teile.items()}
     kameras = {str(k.get("typ")): max(0.0, zahl(k.get("bestand"))) for k in daten.get("kameras", [])}
     komponenten: dict[str, list[tuple[str, float]]] = {}
     for k in daten.get("komponenten", []):

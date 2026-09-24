@@ -110,6 +110,20 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   bei jeder Prüfung. „Wartet auf Freigabe“ und „eingeplant“ aus der Nacht
   (zwischen den beiden Zeiten von „Druckende optimieren“) kommen gesammelt zur
   „Fertig frühestens“-Zeit; Fehlermeldungen kommen sofort.
+- **Packliste** (Meldung „Bestellung kann gepackt werden“): Bei jeder Prüfung
+  rechnet Bambuddy, welche offenen Bestellungen („Offen“ oder „In Arbeit“) jetzt
+  komplett aus dem Lager gepackt werden können – genauso wie das Lager beim
+  Abschließen: erst fertige Teile/Sets aus dem Regal, fehlende Sets aus ihren
+  direkten Bestandteilen, dazu die Kameras (Systemanzahl × 3). Aufträge mit
+  Status „Fertig“ gelten als schon gepackt und belegen ihren Bestand zuerst;
+  danach wird nach Versandtermin verteilt. Ein Auftrag, der nicht komplett
+  aufgeht, hält nichts fest. Die Meldung enthält die Packliste mit Lagerorten
+  und, was aus Einzelteilen zusammengebaut werden muss; Sonderposten stehen
+  dabei, werden aber nicht geprüft. Jede Bestellung wird einmal gemeldet, bei
+  mehr als 3 neuen auf einmal kommt eine Sammelnachricht. Nachts wird nichts
+  geschickt, die Meldung kommt zur „Fertig frühestens“-Zeit. Die Übersicht
+  zeigt die Liste unter „Kann gepackt werden“. Bambuddy liest dafür nur und
+  ändert am Auftrag nichts.
 - **Sicherung**: Meldet das Lager auf eine Buchung „unbekannt“ (die
   Druck-Zuordnung fehlt), hält die Regel an, damit nicht endlos nachgedruckt
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal

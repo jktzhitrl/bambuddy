@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 SCHLUESSEL = "lager_autodruck"
 # Welche Meldungen standardmaessig verschickt werden (siehe melden.EREIGNISSE).
-MELDEN_STANDARD = ("freigabe", "platte", "buchungsfehler", "angehalten", "lager_offline")
+MELDEN_STANDARD = ("freigabe", "platte", "packbar", "buchungsfehler", "angehalten", "lager_offline")
 GEHEIM = ("passwort", "anthropic_api_key")
 
 

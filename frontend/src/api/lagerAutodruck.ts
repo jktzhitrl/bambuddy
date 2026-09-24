@@ -101,6 +101,7 @@ export interface Status {
   uebersicht: UebersichtZeile[];
   vorschau: VorschauZeile[];
   offene_buchungen: number;
+  packbar: { order_id: string; kunde: string; versand_bis: string | null; text: string }[];
 }
 
 export interface Job {

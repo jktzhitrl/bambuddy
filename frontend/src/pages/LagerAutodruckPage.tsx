@@ -204,6 +204,24 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
         </Card>
       )}
 
+      {!!s?.packbar?.length && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-white font-semibold">Kann gepackt werden</h2>
+            <p className="text-xs text-bambu-gray mt-1">
+              Für diese Bestellungen liegt alles im Lager – gerechnet wie beim Abschließen im Lager, frühester Versand zuerst.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {s.packbar.map(p => (
+              <pre key={p.order_id} className="p-3 rounded-lg bg-bambu-dark text-sm text-white whitespace-pre-wrap font-sans">
+                {p.text}
+              </pre>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {wartend.length > 0 && (
         <Card>
           <CardHeader><h2 className="text-white font-semibold">Wartet auf deine Freigabe ({wartend.length})</h2></CardHeader>

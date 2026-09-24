@@ -155,7 +155,16 @@ antwortet. Geht zwischendurch etwas schief, stellt es den vorherigen Zustand
 wieder her. Anderer Port als 8000: `PORT=1234 bash druckuebersicht-umstellen.sh`.
 
 Zurück zum Original: `bash druckuebersicht-zurueck.sh`.
-Spätere Updates: `bash druckuebersicht-umstellen.sh` einfach erneut ausführen.
+
+Spätere Updates: die beiden `curl`-Zeilen oben erneut ausführen (holt die
+aktuelle Fassung der Skripte) und dann `bash druckuebersicht-umstellen.sh`.
+Vor dem Neubau hebt das Skript das bisher laufende Image als
+`druckuebersicht:vorher` auf. Passt nach dem Update etwas nicht, geht es in
+Sekunden zurück auf die vorige Druckübersicht:
+
+```bash
+docker tag druckuebersicht:vorher druckuebersicht:latest && docker compose up -d bambuddy
+```
 
 ### Von Hand
 

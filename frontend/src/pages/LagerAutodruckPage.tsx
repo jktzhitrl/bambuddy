@@ -52,6 +52,13 @@ function dauer(sekunden: number) {
   return h ? `${h} h ${m} min` : `${m} min`;
 }
 
+// "2026-10-01" -> "01.10.2026"
+function datum(tag: string | null | undefined) {
+  if (!tag) return '';
+  const [j, m, t] = tag.slice(0, 10).split('-');
+  return `${t}.${m}.${j}`;
+}
+
 function zahl(n: number | null | undefined) {
   return n === null || n === undefined ? '–' : n.toLocaleString('de-DE');
 }
@@ -188,6 +195,7 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
                   <span className={v.ohne_freigabe ? 'text-blue-400' : 'text-yellow-400'}>
                     {v.ohne_freigabe ? 'würde automatisch starten' : 'würde auf Freigabe warten'}
                   </span>
+                  {v.termin && <span className="text-bambu-gray">Versand bis {datum(v.termin)}</span>}
                 </div>
                 <div className="text-bambu-gray">{v.begruendung}</div>
               </div>
@@ -235,6 +243,7 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
                   <th className="py-2 pr-4 text-right">Mindest</th>
                   <th className="py-2 pr-4 text-right">In Arbeit</th>
                   <th className="py-2 pr-4 text-right">Offene Aufträge</th>
+                  <th className="py-2 pr-4">Versand bis</th>
                   <th className="py-2">Hinweis</th>
                 </tr>
               </thead>
@@ -248,6 +257,7 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
                       <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.mindestbestand)}</td>
                       <td className="py-2 pr-4 text-right text-blue-400">{zahl(z.in_arbeit)}</td>
                       <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.nachfrage)}</td>
+                      <td className="py-2 pr-4 text-bambu-gray">{datum(z.termin)}</td>
                       <td className="py-2 text-bambu-gray">{z.hinweis ?? ''}</td>
                     </tr>
                   );
@@ -861,7 +871,31 @@ function Benachrichtigungen({ k, setze, darfAendern }: {
               {ereignis.titel}
             </label>
           ))}
+          {k.melden.includes('platte') && daten.data && !daten.data.platte_bestaetigen && (
+            <div className="text-xs text-yellow-400">
+              „Platte abräumen“ kommt nur, wenn in Bambuddy unter Einstellungen → Workflow → Warteschlange
+              „Druckplatte-Bestätigung erforderlich“ eingeschaltet ist. Sonst startet der nächste Druck ohne Nachfrage.
+            </div>
+          )}
         </div>
+        {daten.data?.kanaele.some(kanal => kanal.typ === 'telegram') && (
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 text-sm text-white">
+              <input
+                type="checkbox"
+                checked={k.telegram_knoepfe}
+                disabled={!darfAendern}
+                onChange={() => setze('telegram_knoepfe', !k.telegram_knoepfe)}
+              />
+              Knöpfe in Telegram
+            </label>
+            <p className="text-xs text-bambu-gray">
+              Freigaben kommen mit „Freigeben“ und „Verwerfen“, fertige Drucke mit Kamerabild und „Platte ist frei“ –
+              antippen genügt. Es zählt nur ein Tippen aus dem eingetragenen Chat. Aus, wenn derselbe Bot schon von einem
+              anderen Programm abgefragt wird.
+            </p>
+          </div>
+        )}
         {darfAendern && (
           <Button variant="secondary" size="sm" onClick={() => testen.mutate()} disabled={testen.isPending}>
             {testen.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

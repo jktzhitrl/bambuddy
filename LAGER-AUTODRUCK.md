@@ -43,6 +43,14 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   *niedrig*. Optional (Schalter „KI-Einschätzung verwenden“, standardmäßig
   aus) bewertet stattdessen Claude, mit Begründung; das kostet pro Aufruf
   etwas über den eigenen Anthropic-Schlüssel.
+- **Liefertermine**: Hat ein Auftrag im Lager ein „Versand bis“, zählt je Teil
+  der früheste Termin, für den das Teil noch fehlt (fertige Sets gehen zuerst an
+  die Aufträge mit dem frühesten Termin). Reichen Bestand und laufende Drucke
+  nicht für die offenen Aufträge, wird die Dringlichkeit angehoben: Versand in
+  höchstens 2 Tagen oder schon überfällig → *hoch*, in höchstens 7 Tagen →
+  mindestens *mittel*. Das gilt auch, wenn die KI es lockerer sieht. Bei gleicher
+  Dringlichkeit kommt der frühere Termin zuerst in die Warteschlange. Die
+  Übersicht zeigt den Termin in der Spalte „Versand bis“.
 - **Regel je Teil**:
   - *Automatisch*: druckt ohne Nachfrage.
   - *Nach Dringlichkeit*: ohne Nachfrage nur bei Dringlichkeit „niedrig“, sonst Freigabe.
@@ -66,7 +74,27 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   der Übersicht angezeigt, was jetzt eingeplant würde – ohne etwas anzulegen.
 - **Freigeben**: Aufträge, die eine Freigabe brauchen, stehen mit „manueller
   Start“ in der Bambuddy-Warteschlange. Freigeben geht über **Start** in der
-  Warteschlange oder über **Freigeben** auf der Seite „Lager-Autodruck“.
+  Warteschlange, über **Freigeben** auf der Seite „Lager-Autodruck“ oder per
+  Knopf in Telegram (siehe unten).
+- **Telegram-Knöpfe** (Einstellungen → Benachrichtigungen, „Knöpfe in
+  Telegram“, an, sobald ein Telegram-Kanal ausgewählt ist):
+  - „Freigabe nötig“ kommt je Teil als eigene Nachricht mit **✅ Freigeben** und
+    **🗑 Verwerfen**. Ein Knopf gilt für alle wartenden Drucke dieses Teils bis zu
+    dieser Nachricht; später dazugekommene bekommen ihre eigene Nachricht.
+  - „Druck fertig – Platte abräumen“ (Meldung „platte“) kommt mit Kamerabild
+    und **🧹 Platte ist frei**. Der Knopf macht dasselbe wie „Druckplatte als
+    freigegeben markieren“ auf der Druckerkarte, danach startet der nächste
+    Druck. Voraussetzung: in Bambuddy unter *Einstellungen → Workflow →
+    Warteschlange* „Druckplatte-Bestätigung erforderlich“ einschalten, sonst
+    startet der nächste Druck ohne Nachfrage und es kommt keine Meldung. Das
+    Kamerabild folgt Bambuddys Einstellung für das Fertig-Foto.
+  - Nach dem Tippen verschwinden die Knöpfe und das Ergebnis steht unter der
+    Nachricht („2 Drucke freigegeben (Ben)“).
+  - Bambuddy holt die Knopfdrücke selbst bei Telegram ab (getUpdates); es
+    braucht keine öffentliche Adresse. Angenommen wird nur ein Tippen aus dem
+    Chat, der im Kanal eingetragen ist – in einer Gruppe darf jedes Mitglied.
+    Fragt ein anderes Programm denselben Bot ab, den Schalter ausschalten
+    (oder einen eigenen Bot nehmen); dann kommen die Meldungen ohne Knöpfe.
 - **Verbuchen**: Nach jedem Druckende ruft Bambuddy im Lager die bestehende
   Funktion `druck_verbuchen` auf, dieselbe, die vorher der Webhook benutzt hat.
   Meldungen werden zuerst lokal gespeichert und bei Netzproblemen automatisch

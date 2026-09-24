@@ -27,7 +27,8 @@ _SYSTEM = (
     "Du unterstuetzt die Lagerhaltung einer kleinen 3D-Druck-Werkstatt. "
     "Fuer jede aufgefuehrte Baugruppe schaetzt du ein, wie dringend ein Nachdruck ist, "
     "und begruendest das in ein bis zwei Saetzen auf Deutsch, konkret und knapp "
-    "(Bestand gegenueber Mindestbestand, schon laufende Drucke, offene Auftraege, Kategorie). "
+    "(Bestand gegenueber Mindestbestand, schon laufende Drucke, offene Auftraege, Kategorie, "
+    "fruehester Versandtermin der Auftraege). "
     "Die Stueckzahl steht bereits fest, die aenderst du nicht. "
     "Je nach Einstellung startet 'niedrig' einen Druck ohne menschliche Freigabe - "
     "vergib das nur, wenn es wirklich unkritisch ist. 'hoch' wird in der Warteschlange vorgezogen."
@@ -76,6 +77,7 @@ async def einschaetzen(
             "mindestbestand": k.mindestbestand,
             "schon_in_arbeit": k.in_arbeit,
             "bedarf_aus_offenen_auftraegen": k.nachfrage,
+            "fruehester_versand": k.termin.isoformat() if k.termin else None,
             "geplante_stueckzahl": k.stueck,
         }
         for k in kandidaten

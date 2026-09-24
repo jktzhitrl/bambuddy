@@ -1,6 +1,6 @@
 """Tests fuer das Fork-Modul Lager-Autodruck."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -252,12 +252,14 @@ async def test_lager_client_falsches_passwort():
 class FakeLager:
     def __init__(self, teile):
         self.teile = teile
+        self.auftraege = []
+        self.positionen = []
         self.buchungen = []
         self.fehler = False
         self.antwort = "gebucht"
 
     async def lade_bestandsdaten(self):
-        return _daten(self.teile)
+        return _daten(self.teile, auftraege=self.auftraege, positionen=self.positionen)
 
     async def druck_verbuchen(self, **kw):
         if self.fehler:
@@ -730,3 +732,312 @@ async def test_vorschau_bei_ausgeschaltetem_autodruck(umgebung, db_session):
     assert (v["name"], v["druecke"], v["stueck"], v["ohne_freigabe"]) == ("Halter", 4, 8, False)
     assert service.uebersicht[0]["bestand"] == 1
     assert aufrufe == [None]  # Vorschau fragt die KI nicht (kostet nichts)
+
+
+# --- Liefertermine -------------------------------------------------------------
+
+
+def test_termin_frueheste_je_teil_fertige_sets_zuerst_an_fruehe_auftraege():
+    daten = _daten(
+        [{"id": "set", "bestand": 1}, {"id": "a", "bestand": 0}, {"id": "b", "bestand": 0}],
+        komponenten=[{"part_id": "set", "komponente_id": "a", "menge": 1}],
+        auftraege=[
+            {"id": "spaet", "versand_bis": "2026-10-20"},
+            {"id": "frueh", "versand_bis": "2026-10-01T00:00:00+00:00"},
+            {"id": "ohne", "versand_bis": None},
+        ],
+        positionen=[
+            {"order_id": "spaet", "part_id": "set", "menge": 1},
+            {"order_id": "frueh", "part_id": "set", "menge": 1},
+            {"order_id": "ohne", "part_id": "b", "menge": 2},
+            {"order_id": "frueh", "part_id": "b", "menge": 1},
+        ],
+    )
+    nachfrage, termine = bedarf.bedarf_je_teil(daten)
+    # Das fertige Set geht an den fruehen Auftrag, fuer "a" bleibt der spaete.
+    assert nachfrage == {"a": 1, "b": 3}
+    assert termine == {"a": date(2026, 10, 20), "b": date(2026, 10, 1)}
+    assert bedarf.nachfrage_je_teil(daten) == nachfrage
+
+
+def _kandidat(**kw):
+    werte = {
+        "regel_id": 1,
+        "part_id": "a",
+        "name": "A",
+        "kategorie": None,
+        "bestand": 0,
+        "mindestbestand": 10,
+        "nachfrage": 3,
+        "in_arbeit": 0,
+        "verfuegbar": 7,
+        "druecke": 1,
+        "stueck": 1,
+    }
+    werte.update(kw)
+    return bedarf.Kandidat(**werte)
+
+
+def test_termin_hebt_dringlichkeit_nur_wenn_bestand_nicht_reicht():
+    heute = date(2026, 9, 24)
+    ohne = _kandidat(bestand=5, verfuegbar=2, mindestbestand=4)
+    assert bedarf.regel_dringlichkeit(ohne, heute) == "mittel"
+    assert bedarf.regel_dringlichkeit(_kandidat(bestand=2, termin=date(2026, 9, 26)), heute) == "hoch"
+    assert bedarf.regel_dringlichkeit(_kandidat(bestand=2, termin=date(2026, 9, 20)), heute) == "hoch"  # ueberfaellig
+    niedrig = {"bestand": 2, "verfuegbar": 9, "mindestbestand": 4}
+    assert bedarf.regel_dringlichkeit(_kandidat(**niedrig, termin=date(2026, 9, 30)), heute) == "mittel"
+    assert bedarf.regel_dringlichkeit(_kandidat(**niedrig, termin=date(2026, 10, 30)), heute) == "niedrig"
+    # Bestand + laufende Drucke decken die Auftraege: Termin egal.
+    gedeckt = _kandidat(bestand=2, in_arbeit=1, nachfrage=3, verfuegbar=9, mindestbestand=4, termin=date(2026, 9, 25))
+    assert bedarf.regel_dringlichkeit(gedeckt, heute) == "niedrig"
+    assert bedarf.mindestens("niedrig", "hoch") == "hoch" and bedarf.mindestens("hoch", "mittel") == "hoch"
+
+
+async def test_naher_termin_kommt_zuerst_in_die_warteschlange(umgebung, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    lager.teile = [
+        {"id": "teil-1", "name": "Halter", "bestand": 0, "mindestbestand": 0},
+        {"id": "teil-2", "name": "Ring", "bestand": 0, "mindestbestand": 0},
+    ]
+    lager.auftraege = [{"id": "o1", "versand_bis": "2099-01-10"}, {"id": "o2", "versand_bis": "2099-01-05"}]
+    lager.positionen = [
+        {"order_id": "o1", "part_id": "teil-1", "menge": 1},
+        {"order_id": "o2", "part_id": "teil-2", "menge": 1},
+    ]
+    async with sessions() as db:
+        for part_id, name in (("teil-1", "Halter"), ("teil-2", "Ring")):
+            db.add(
+                LagerDruckRegel(
+                    part_id=part_id,
+                    part_name=name,
+                    archive_id=archiv.id,
+                    dateiname=name,
+                    stueck_je_druck=1,
+                    modus=MODUS_AUTOMATISCH,
+                    printer_id=drucker.id,
+                )
+            )
+        await db.commit()
+    # Schon ein Druck in der Warteschlange - "hoch" wird davor eingereiht.
+    db_session.add(PrintQueueItem(printer_id=drucker.id, archive_id=archiv.id, position=1, status="pending"))
+    await db_session.commit()
+
+    await service.durchlauf()
+    jobs = {j.part_id: j for j in await _alle(sessions, LagerDruckJob)}
+    assert jobs["teil-1"].dringlichkeit == jobs["teil-2"].dringlichkeit == "hoch"  # Bestand 0, Bedarf da
+    items = {i.id: i.position for i in await _alle(sessions, PrintQueueItem)}
+    reihenfolge = sorted(items, key=items.get)
+    # Frueherer Termin (Ring) zuerst, dann Halter, dann der alte Eintrag.
+    assert reihenfolge == [jobs["teil-2"].queue_item_id, jobs["teil-1"].queue_item_id, 1]
+    assert "Versand bis 05.01." in jobs["teil-2"].begruendung
+    assert service.uebersicht[1]["termin"] == date(2099, 1, 5)
+
+
+# --- Telegram-Knoepfe ------------------------------------------------------------
+
+
+async def _wartende_auftraege(umgebung, stueck=10):
+    service, lager, drucker, archiv, sessions = umgebung
+    regel_id = await _regel_anlegen(sessions, archiv, drucker, modus=MODUS_FREIGABE, stueck_je_druck=stueck)
+    await service.durchlauf()
+    jobs = await _alle(sessions, LagerDruckJob)
+    assert jobs and {j.status for j in jobs} == {JOB_WARTET}
+    return regel_id, jobs
+
+
+async def test_knopf_freigeben_bis_zur_nachricht(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+    regel_id, jobs = await _wartende_auftraege(umgebung, stueck=2)  # 4 Drucke
+    antwort = await service.knopf_ausfuehren(f"f:{regel_id}:{jobs[2].id}", "Telegram (Ben)")
+    assert antwort == "3 Drucke freigegeben"
+    jobs = await _alle(sessions, LagerDruckJob)
+    assert [j.status for j in jobs] == [JOB_GEPLANT] * 3 + [JOB_WARTET]
+    assert jobs[0].freigegeben_von == "Telegram (Ben)"
+    items = {i.id: i for i in await _alle(sessions, PrintQueueItem)}
+    assert [items[j.queue_item_id].manual_start for j in jobs] == [False, False, False, True]
+    # Zweimal gedrueckt (oder Telegram liefert erneut): nichts passiert.
+    assert await service.knopf_ausfuehren(f"f:{regel_id}:{jobs[2].id}", "x") == "Schon erledigt - nichts wartet mehr."
+
+
+async def test_knopf_verwerfen(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+    regel_id, jobs = await _wartende_auftraege(umgebung)
+    assert await service.knopf_ausfuehren(f"v:{regel_id}:{jobs[-1].id}", "x") == "1 Druck verworfen"
+    assert await _alle(sessions, PrintQueueItem) == []
+    assert (await _alle(sessions, LagerDruckJob))[0].status == JOB_VERWORFEN
+
+
+async def test_knopf_unbekannt(umgebung):
+    service = umgebung[0]
+    for daten in ("", "x:1", "f:1", "f:a:b", "p:"):
+        assert await service.knopf_ausfuehren(daten, "x") == "Unbekannter Knopf."
+
+
+async def test_knopf_platte_frei(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+    from backend.app.services.printer_manager import printer_manager
+
+    wartet = {drucker.id}
+    with (
+        patch.object(printer_manager, "is_awaiting_plate_clear", lambda pid: pid in wartet),
+        patch.object(printer_manager, "set_awaiting_plate_clear", lambda pid, a: wartet.discard(pid)),
+    ):
+        assert await service.knopf_ausfuehren(f"p:{drucker.id}", "x") == "Platte frei - nächster Druck kann starten"
+        assert wartet == set()
+        assert await service.knopf_ausfuehren(f"p:{drucker.id}", "x") == "Platte war schon als frei gemeldet."
+
+
+@pytest.fixture
+async def telegram_kanal(umgebung, db_session, gemeldet):
+    """Zusaetzlich zum ntfy-Kanal ein Telegram-Kanal; Telegram-Nachrichten mitschneiden."""
+    import json
+
+    from backend.app.models.notification import NotificationProvider
+
+    kanal = NotificationProvider(
+        name="Telegram",
+        provider_type="telegram",
+        config=json.dumps({"bot_token": "123:abc", "chat_id": "42"}),
+        enabled=True,
+    )
+    db_session.add(kanal)
+    await db_session.commit()
+    k = await konfig.laden(db_session)
+    k.melden_an = [*k.melden_an, kanal.id]
+    k.melden = [*k.melden, "platte"]
+    await konfig.speichern(db_session, k)
+
+    nachrichten = []
+
+    async def fake_nachricht(bot, text, markup=None, foto=None):
+        nachrichten.append((bot.chat_id, text, markup, foto))
+        return True
+
+    with patch("backend.app.services.lager_autodruck.telegram.nachricht", fake_nachricht):
+        yield nachrichten
+
+
+async def test_freigabe_meldung_mit_knoepfen_auf_telegram(umgebung, gemeldet, telegram_kanal):
+    regel_id, jobs = await _wartende_auftraege(umgebung, stueck=2)
+    ((chat, text, markup, foto),) = telegram_kanal
+    assert chat == "42" and "Halter" in text and foto is None
+    (zeile,) = markup["inline_keyboard"]
+    assert [k["callback_data"] for k in zeile] == [f"f:{regel_id}:{jobs[-1].id}", f"v:{regel_id}:{jobs[-1].id}"]
+    # Die anderen Kanaele bekommen die Sammelnachricht, Telegram nicht doppelt.
+    ((_, _, _, kanaele),) = gemeldet
+    assert kanaele == ["Handy"]
+
+
+async def test_ohne_knoepfe_normale_meldung_auch_auf_telegram(umgebung, gemeldet, telegram_kanal, db_session):
+    k = await konfig.laden(db_session)
+    k.telegram_knoepfe = False
+    await konfig.speichern(db_session, k)
+    await _wartende_auftraege(umgebung)
+    assert telegram_kanal == []
+    ((_, _, _, kanaele),) = gemeldet
+    assert sorted(kanaele) == ["Handy", "Telegram"]
+
+
+async def test_platte_belegt_schickt_foto_und_knopf(umgebung, gemeldet, telegram_kanal, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    from backend.app.api.routes.settings import get_setting
+    from backend.app.core.db_dialect import upsert_setting
+    from backend.app.models.settings import Settings
+
+    async def kamerabild(printer_id, printer):
+        return b"jpeg"
+
+    with patch("backend.app.services.lager_autodruck.service._kamerabild", kamerabild):
+        # Ohne "Platte bestaetigen" in Bambuddy: keine Meldung.
+        await service.bei_platte_belegt(drucker.id)
+        assert telegram_kanal == [] and gemeldet == []
+
+        await upsert_setting(db_session, Settings, "require_plate_clear", "true")
+        await db_session.commit()
+        assert await get_setting(db_session, "require_plate_clear") == "true"
+        await service.bei_platte_belegt(drucker.id)
+
+    ((chat, text, markup, foto),) = telegram_kanal
+    assert drucker.name in text and foto == b"jpeg"
+    assert markup["inline_keyboard"][0][0]["callback_data"] == f"p:{drucker.id}"
+    ((ereignis, _, _, kanaele),) = gemeldet
+    assert ereignis == "lager_autodruck_platte" and kanaele == ["Handy"]
+
+
+def _telegram_client(antworten, aufrufe):
+    def handler(request: httpx.Request) -> httpx.Response:
+        methode = request.url.path.rsplit("/", 1)[-1]
+        aufrufe.append((methode, request))
+        ergebnis = antworten.get(methode, True)
+        if callable(ergebnis):
+            ergebnis = ergebnis(request)
+        return httpx.Response(200, json={"ok": True, "result": ergebnis})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_rueckkanal_nur_eigener_chat_und_nachricht_wird_aktualisiert():
+    import json
+
+    from backend.app.services.lager_autodruck import telegram
+
+    ausgefuehrt = []
+
+    async def ausfuehren(daten, wer):
+        ausgefuehrt.append((daten, wer))
+        return "1 Druck freigegeben"
+
+    updates = [
+        {
+            "update_id": 7,
+            "callback_query": {
+                "id": "q1",
+                "data": "f:1:2",
+                "from": {"first_name": "Mallory"},
+                "message": {"message_id": 5, "chat": {"id": 666}, "text": "Freigabe nötig"},
+            },
+        },
+        {
+            "update_id": 8,
+            "callback_query": {
+                "id": "q2",
+                "data": "f:1:2",
+                "from": {"first_name": "Ben"},
+                "message": {"message_id": 6, "chat": {"id": 42}, "text": "Freigabe nötig"},
+            },
+        },
+    ]
+    aufrufe = []
+    rueckkanal = telegram.Rueckkanal(ausfuehren)
+    bot = telegram.Bot(provider_id=1, token="123:abc", chat_id="42")
+
+    def get_updates(request):
+        # Mit offset sind die Updates bestaetigt - Telegram liefert sie nicht nochmal.
+        return [] if "offset" in json.loads(request.content) else updates
+
+    async with _telegram_client({"getUpdates": get_updates}, aufrufe) as client:
+        assert await rueckkanal.abholen(client, [bot]) is True
+        # Beim naechsten Abholen werden die gesehenen Updates bestaetigt.
+        await rueckkanal.abholen(client, [bot])
+
+    assert ausgefuehrt == [("f:1:2", "Telegram (Ben)")]
+    methoden = [m for m, _ in aufrufe]
+    assert methoden == ["getUpdates", "answerCallbackQuery", "answerCallbackQuery", "editMessageText", "getUpdates"]
+    bearbeitet = json.loads(aufrufe[3][1].content)
+    assert bearbeitet["chat_id"] == "42" and bearbeitet["message_id"] == 6
+    assert bearbeitet["text"] == "Freigabe nötig\n\n→ 1 Druck freigegeben (Ben)"
+    assert json.loads(aufrufe[4][1].content)["offset"] == 9
+
+
+async def test_rueckkanal_fehler_von_telegram():
+    from backend.app.services.lager_autodruck import telegram
+
+    def handler(request):
+        return httpx.Response(409, json={"ok": False, "description": "Conflict: terminated by other getUpdates"})
+
+    async def ausfuehren(daten, wer):
+        raise AssertionError("darf nicht laufen")
+
+    bot = telegram.Bot(provider_id=1, token="123:abc", chat_id="42")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await telegram.Rueckkanal(ausfuehren).abholen(client, [bot]) is False

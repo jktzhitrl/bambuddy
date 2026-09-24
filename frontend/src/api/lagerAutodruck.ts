@@ -47,6 +47,7 @@ export interface Konfig {
   puffer_minuten: number;
   melden_an: number[];
   melden: string[];
+  telegram_knoepfe: boolean;
   eingerichtet?: boolean;
 }
 
@@ -75,6 +76,7 @@ export interface UebersichtZeile {
   nachfrage: number;
   in_arbeit: number;
   hinweis: string | null;
+  termin: string | null;
 }
 
 export interface VorschauZeile {
@@ -85,6 +87,7 @@ export interface VorschauZeile {
   dringlichkeit: string;
   begruendung: string;
   ohne_freigabe: boolean;
+  termin: string | null;
 }
 
 export interface Status {
@@ -151,6 +154,7 @@ export interface ArchivAuswahl {
 export interface Benachrichtigung {
   kanaele: { id: number; name: string; typ: string; aktiv: boolean }[];
   ereignisse: { id: string; titel: string }[];
+  platte_bestaetigen: boolean;
 }
 
 export interface DruckerAuswahl {

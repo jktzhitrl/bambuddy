@@ -13,6 +13,8 @@
 #   2. Quellcode holen/aktualisieren und Image bauen (Bambuddy laeuft solange weiter)
 #   3. Bambuddy stoppen, Daten sichern, docker-compose.yml sichern und anpassen
 #   4. Starten und pruefen, ob die Druckuebersicht antwortet
+# Auch fuer Updates: einfach erneut ausfuehren. Das bisher laufende Image
+# bleibt als druckuebersicht:vorher erhalten (Rueckweg siehe Ende der Ausgabe).
 # Zurueck zum Original: bash druckuebersicht-zurueck.sh
 #
 # Einstellbar ueber Umgebungsvariablen:
@@ -27,6 +29,7 @@ set -euo pipefail
 
 REPO="https://github.com/jktzhitrl/bambuddy.git"
 IMAGE="druckuebersicht:latest"
+IMAGE_VORHER="druckuebersicht:vorher"
 QUELLE="${QUELLE:-$HOME/druckuebersicht-src}"
 ZWEIG="${ZWEIG:-main}"
 PORT="${PORT:-8000}"
@@ -125,6 +128,11 @@ else
     git clone --quiet --branch "$ZWEIG" "$REPO" "$QUELLE"
 fi
 echo "Stand: $(git -C "$QUELLE" log --oneline -1)"
+# Update: das bisher gebaute Image als Rueckweg aufheben, bevor es ersetzt wird.
+if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    docker tag "$IMAGE" "$IMAGE_VORHER"
+    gruen "Bisherige Druckuebersicht gesichert als $IMAGE_VORHER."
+fi
 docker build -t "$IMAGE" "$QUELLE"
 gruen "Image $IMAGE gebaut."
 
@@ -177,6 +185,9 @@ for _ in $(seq 1 60); do
         echo "Naechste Schritte: Lager-Autodruck -> Einstellungen (Supabase-Werte, Verbindung testen),"
         echo "Regeln anlegen, 'Jetzt pruefen' und die Vorschau ansehen. Autodruck erst danach einschalten."
         echo "Zurueck zum Original: bash druckuebersicht-zurueck.sh"
+        if docker image inspect "$IMAGE_VORHER" >/dev/null 2>&1; then
+            echo "Zurueck zur vorigen Druckuebersicht: docker tag $IMAGE_VORHER $IMAGE && docker compose up -d $DIENST"
+        fi
         exit 0
     fi
     if [[ "$code" == "404" ]]; then
@@ -191,4 +202,7 @@ gelb "Nach 3 Minuten keine Antwort auf Port $PORT (probiert: $ADRESSEN)."
 gelb "Log ansehen: docker compose logs --tail 100 $DIENST"
 gelb "Andere Adresse/Port? Pruefen mit: curl http://<IP>:<PORT>/api/v1/lager-autodruck/status"
 gelb "Zurueck zum Original: bash druckuebersicht-zurueck.sh"
+if docker image inspect "$IMAGE_VORHER" >/dev/null 2>&1; then
+    gelb "Zurueck zur vorigen Druckuebersicht: docker tag $IMAGE_VORHER $IMAGE && docker compose up -d $DIENST"
+fi
 exit 1

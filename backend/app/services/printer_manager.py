@@ -537,6 +537,11 @@ class PrinterManager:
         except Exception as e:
             logger.warning("Failed to send plate-clear notification for printer %d: %s", printer_id, e)
 
+        # Fork: Lager-Autodruck - "Platte ist frei"-Knopf per Telegram.
+        from backend.app.services.lager_autodruck.service import lager_autodruck_service
+
+        await lager_autodruck_service.bei_platte_belegt(printer_id)
+
     async def _printer_info_from_db(self, printer_id: int) -> PrinterInfo | None:
         """Name and serial for a printer with no registered client."""
         from backend.app.core.database import async_session

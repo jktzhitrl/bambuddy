@@ -24,9 +24,6 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.lager_autodruck import (
     BUCHUNG_GESENDET,
     BUCHUNG_OFFEN,
-    JOB_GEPLANT,
-    JOB_VERWORFEN,
-    JOB_WARTET,
     MODI,
     MODUS_KI,
     LagerBuchung,
@@ -38,7 +35,11 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.lager_autodruck import konfig, melden, nachtruhe
-from backend.app.services.lager_autodruck.service import dateiname_aus_archiv, lager_autodruck_service
+from backend.app.services.lager_autodruck.service import (
+    FreigabeFehler,
+    dateiname_aus_archiv,
+    lager_autodruck_service,
+)
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import utcnow_naive
 
@@ -74,6 +75,7 @@ class KonfigDaten(BaseModel):
     puffer_minuten: int = Field(15, ge=0, le=240)
     melden_an: list[int] = Field(default_factory=list)
     melden: list[str] = Field(default_factory=lambda: list(konfig.MELDEN_STANDARD))
+    telegram_knoepfe: bool = True
 
     @field_validator("melden")
     @classmethod
@@ -134,6 +136,7 @@ async def konfig_speichern(
         puffer_minuten=daten.puffer_minuten,
         melden_an=list(dict.fromkeys(daten.melden_an)),
         melden=daten.melden,
+        telegram_knoepfe=daten.telegram_knoepfe,
     )
     await konfig.speichern(db, neu)
     lager_autodruck_service.aufwecken()
@@ -161,10 +164,14 @@ async def kanaele_lesen(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
 ):
     """Bambuddys Benachrichtigungs-Kanaele zur Auswahl, plus die moeglichen Meldungen."""
+    from backend.app.api.routes.settings import get_setting
+
     kanaele = (await db.execute(select(NotificationProvider).order_by(NotificationProvider.name))).scalars().all()
     return {
         "kanaele": [{"id": p.id, "name": p.name, "typ": p.provider_type, "aktiv": bool(p.enabled)} for p in kanaele],
         "ereignisse": [{"id": k, "titel": t} for k, t in melden.EREIGNISSE.items()],
+        # "Platte abraeumen" braucht Bambuddys Druckplatten-Bestaetigung.
+        "platte_bestaetigen": (await get_setting(db, "require_plate_clear") or "").lower() == "true",
     }
 
 
@@ -459,12 +466,11 @@ async def jobs_lesen(
     ]
 
 
-async def _offener_job(db: AsyncSession, job_id: int) -> tuple[LagerDruckJob, PrintQueueItem | None]:
+async def _job(db: AsyncSession, job_id: int) -> LagerDruckJob:
     job = await db.get(LagerDruckJob, job_id)
     if job is None:
         raise HTTPException(404, "Auftrag nicht gefunden")
-    item = await db.get(PrintQueueItem, job.queue_item_id) if job.queue_item_id else None
-    return job, item
+    return job
 
 
 @router.post("/jobs/{job_id}/freigeben")
@@ -473,14 +479,11 @@ async def job_freigeben(
     db: AsyncSession = Depends(get_db),
     benutzer: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_ALL),
 ):
-    job, item = await _offener_job(db, job_id)
-    if job.status != JOB_WARTET or item is None or item.status != "pending":
-        raise HTTPException(409, "Dieser Auftrag wartet nicht (mehr) auf Freigabe.")
-    item.manual_start = False
-    job.status = JOB_GEPLANT
-    job.freigegeben_von = benutzer.username if benutzer else "Oberflaeche"
-    # Auch ein freigegebener Druck soll nicht in der Nacht fertig werden.
-    lager_autodruck_service.nachtruhe_fuer_item(await konfig.laden(db), item, utcnow_naive())
+    job = await _job(db, job_id)
+    try:
+        item = await lager_autodruck_service.job_freigeben(db, job, benutzer.username if benutzer else "Oberflaeche")
+    except FreigabeFehler as e:
+        raise HTTPException(409, str(e)) from None
     await db.commit()
     lager_autodruck_service.aufwecken()
     return {"ok": True, "geplanter_start": _iso(item.scheduled_time)}
@@ -492,16 +495,11 @@ async def job_verwerfen(
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_ALL),
 ):
-    job, item = await _offener_job(db, job_id)
-    if job.status not in (JOB_WARTET, JOB_GEPLANT):
-        raise HTTPException(409, "Nur Auftraege, die noch nicht drucken, koennen verworfen werden.")
-    if item is not None:
-        if item.status != "pending":
-            raise HTTPException(409, "Der Druck laeuft bereits.")
-        await db.delete(item)
-    job.status = JOB_VERWORFEN
-    job.queue_item_id = None
-    job.finished_at = utcnow_naive()
+    job = await _job(db, job_id)
+    try:
+        await lager_autodruck_service.job_verwerfen(db, job)
+    except FreigabeFehler as e:
+        raise HTTPException(409, str(e)) from None
     await db.commit()
     return {"ok": True}
 

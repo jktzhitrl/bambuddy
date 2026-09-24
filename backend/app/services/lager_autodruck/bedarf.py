@@ -11,12 +11,22 @@ zwei Aenderungen:
   bestand + in_arbeit - bedarf_aus_auftraegen.
 
 Nachgefuellt wird wie bisher auf den doppelten Mindestbestand.
+
+Liefertermine: hat ein Auftrag ein "Versand bis", zaehlt fuer jedes Teil der
+frueheste Termin, fuer den es noch fehlt. Er hebt die Dringlichkeit an und
+bestimmt die Reihenfolge in der Warteschlange.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
+
+# Versand in hoechstens so vielen Tagen (oder schon ueberfaellig) -> "hoch",
+# in hoechstens TERMIN_TAGE_MITTEL Tagen -> mindestens "mittel".
+TERMIN_TAGE_HOCH = 2
+TERMIN_TAGE_MITTEL = 7
 
 
 def zahl(wert: object) -> float:
@@ -52,6 +62,7 @@ class Kandidat:
     druecke: int
     stueck: int  # druecke * stueck_je_druck
     gekappt: bool = False  # Tageslimit hat druecke verringert
+    termin: date | None = None  # fruehestes "Versand bis" der Auftraege, die das Teil brauchen
 
 
 @dataclass
@@ -66,6 +77,17 @@ class Uebersicht:
     nachfrage: float
     in_arbeit: float
     hinweis: str | None = None
+    termin: date | None = None
+
+
+def datum(wert: object) -> date | None:
+    """ "2026-09-30" oder "2026-09-30T00:00:00+00:00" -> date; sonst None."""
+    if not wert:
+        return None
+    try:
+        return date.fromisoformat(str(wert)[:10])
+    except ValueError:
+        return None
 
 
 def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
@@ -75,6 +97,15 @@ def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
     vom Set-Bestand genommen, nur fuer den Rest werden Bestandteile gebraucht
     (auch bei Sets in Sets). Ohne das wuerde fuer Sets, die schon fertig im
     Regal liegen, trotzdem nachgedruckt.
+    """
+    return bedarf_je_teil(daten)[0]
+
+
+def bedarf_je_teil(daten: dict[str, list[dict]]) -> tuple[dict[str, float], dict[str, date]]:
+    """Wie nachfrage_je_teil, zusaetzlich der frueheste Liefertermin je Teil.
+
+    Auftraege mit frueherem Termin bekommen fertige Sets zuerst - so wie sie
+    auch zuerst verschickt werden.
     """
     komponenten_je_set: dict[str, list[tuple[str, float]]] = {}
     for k in daten.get("komponenten", []):
@@ -88,11 +119,14 @@ def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
     }
 
     nachfrage: dict[str, float] = {}
+    termine: dict[str, date] = {}
 
-    def verteilen(teil: str, menge: float, pfad: tuple[str, ...]) -> None:
+    def verteilen(teil: str, menge: float, pfad: tuple[str, ...], termin: date | None) -> None:
         bestandteile = komponenten_je_set.get(teil)
         if not bestandteile or teil in pfad:  # Einzelteil (oder Kreis - dann nicht weiter zerlegen)
             nachfrage[teil] = nachfrage.get(teil, 0.0) + menge
+            if termin is not None and (teil not in termine or termin < termine[teil]):
+                termine[teil] = termin
             return
         vom_lager = min(menge, set_bestand.get(teil, 0.0))
         set_bestand[teil] = set_bestand.get(teil, 0.0) - vom_lager
@@ -100,16 +134,19 @@ def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
         if rest <= 0:
             return
         for komponente, je_set in bestandteile:
-            verteilen(komponente, rest * je_set, pfad + (teil,))
+            verteilen(komponente, rest * je_set, pfad + (teil,), termin)
 
-    offene = {str(a.get("id")) for a in daten.get("auftraege", [])}
-    for pos in daten.get("positionen", []):
-        if str(pos.get("order_id")) not in offene or not pos.get("part_id"):
-            continue
-        menge = zahl(pos.get("menge"))
-        if menge > 0:
-            verteilen(str(pos.get("part_id")), menge, ())
-    return nachfrage
+    termin_je_auftrag = {str(a.get("id")): datum(a.get("versand_bis")) for a in daten.get("auftraege", [])}
+    positionen = [
+        p
+        for p in daten.get("positionen", [])
+        if str(p.get("order_id")) in termin_je_auftrag and p.get("part_id") and zahl(p.get("menge")) > 0
+    ]
+    # Frueheste Termine zuerst, ohne Termin zuletzt.
+    positionen.sort(key=lambda p: termin_je_auftrag[str(p.get("order_id"))] or date.max)
+    for pos in positionen:
+        verteilen(str(pos.get("part_id")), zahl(pos.get("menge")), (), termin_je_auftrag[str(pos.get("order_id"))])
+    return nachfrage, termine
 
 
 def berechne(
@@ -119,7 +156,7 @@ def berechne(
 ) -> tuple[list[Kandidat], list[Uebersicht]]:
     teile = {str(t.get("id")): t for t in daten.get("teile", [])}
     sets = {str(k.get("part_id")) for k in daten.get("komponenten", [])}
-    nachfrage = nachfrage_je_teil(daten)
+    nachfrage, termine = bedarf_je_teil(daten)
 
     kandidaten: list[Kandidat] = []
     uebersicht: list[Uebersicht] = []
@@ -139,7 +176,8 @@ def berechne(
         name = str(teil.get("name") or regel.part_id)
         bestand = zahl(teil.get("bestand"))
         mindest = zahl(teil.get("mindestbestand"))
-        eintrag = Uebersicht(regel.regel_id, regel.part_id, name, bestand, mindest, bedarf, arbeit)
+        termin = termine.get(regel.part_id)
+        eintrag = Uebersicht(regel.regel_id, regel.part_id, name, bestand, mindest, bedarf, arbeit, termin=termin)
         uebersicht.append(eintrag)
 
         if regel.part_id in sets:
@@ -178,18 +216,45 @@ def berechne(
                 druecke=druecke,
                 stueck=druecke * je_druck,
                 gekappt=gekappt,
+                termin=termin,
             )
         )
     return kandidaten, uebersicht
 
 
-def regel_dringlichkeit(k: Kandidat) -> str:
+def termin_dringlichkeit(k: Kandidat, heute: date) -> str | None:
+    """Mindest-Dringlichkeit aus dem Liefertermin.
+
+    Nur wenn Bestand und laufende Drucke die offenen Auftraege nicht decken -
+    sonst liegt die Ware schon da und der Termin ist kein Grund zur Eile.
+    """
+    if k.termin is None or k.bestand + k.in_arbeit >= k.nachfrage:
+        return None
+    tage = (k.termin - heute).days
+    if tage <= TERMIN_TAGE_HOCH:
+        return "hoch"
+    if tage <= TERMIN_TAGE_MITTEL:
+        return "mittel"
+    return None
+
+
+def mindestens(dringlichkeit: str, untergrenze: str | None) -> str:
+    """Die dringendere von beiden (hoch > mittel > niedrig)."""
+    rang = {"hoch": 0, "mittel": 1, "niedrig": 2}
+    if untergrenze is None or rang.get(dringlichkeit, 3) <= rang[untergrenze]:
+        return dringlichkeit
+    return untergrenze
+
+
+def regel_dringlichkeit(k: Kandidat, heute: date | None = None) -> str:
     """Rueckfall, wenn keine KI eingerichtet ist oder sie nicht antwortet."""
     if k.bestand <= 0 and k.nachfrage > 0:
-        return "hoch"
-    if k.verfuegbar <= k.mindestbestand / 2:
-        return "mittel"
-    return "niedrig"
+        stufe = "hoch"
+    elif k.verfuegbar <= k.mindestbestand / 2:
+        stufe = "mittel"
+    else:
+        stufe = "niedrig"
+    return mindestens(stufe, termin_dringlichkeit(k, heute) if heute else None)
 
 
 def regel_begruendung(k: Kandidat) -> str:
@@ -198,4 +263,6 @@ def regel_begruendung(k: Kandidat) -> str:
         text += f", {k.in_arbeit:g} schon in Arbeit"
     if k.nachfrage:
         text += f", {k.nachfrage:g} Stueck fuer offene Auftraege benoetigt"
+        if k.termin:
+            text += f" (Versand bis {k.termin:%d.%m.})"
     return text + "."

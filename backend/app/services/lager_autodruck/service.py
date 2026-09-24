@@ -20,7 +20,7 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,9 +49,9 @@ from backend.app.models.lager_autodruck import (
 )
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe
+from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe, telegram
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
-from backend.app.utils.local_time import local_day_start, utcnow_naive
+from backend.app.utils.local_time import local_day_start, local_zone, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,10 @@ BUCHUNG_OK = ("gebucht", "schon_gebucht")
 BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert")
 # Nach so vielen Fehlschlaegen in Folge gibt es eine Benachrichtigung.
 MELDEN_NACH_VERSUCHEN = 3
+
+
+class FreigabeFehler(Exception):
+    """Auftrag kann (nicht mehr) freigegeben oder verworfen werden."""
 
 
 def dateiname_aus_druck(subtask_name: str | None, filename: str | None) -> str:
@@ -111,6 +115,7 @@ class LagerAutodruckService:
         self._gemeldet_gesperrt: set[int] = set()
         self._fehler_in_folge = 0
         self._offline_gemeldet = False
+        self.telegram = telegram.Rueckkanal(self.knopf_ausfuehren)
 
     # --- Lebenszyklus -----------------------------------------------------
 
@@ -119,11 +124,13 @@ class LagerAutodruckService:
             from backend.app.core.tasks import spawn_background_task
 
             self._task = spawn_background_task(self._schleife(), name="lager-autodruck")
+        self.telegram.start()
 
     def stop(self) -> None:
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        self.telegram.stop()
 
     def aufwecken(self) -> None:
         """Naechsten Durchlauf sofort starten (z.B. nach geaenderten Einstellungen)."""
@@ -311,15 +318,19 @@ class LagerAutodruckService:
             api_key=k.anthropic_api_key if k.ki_verwenden and not vorschau else None,
             modell=k.ki_modell,
         )
+        heute = datetime.now(local_zone()).date()
         bewertet = []
         for c in kandidaten:
             dringlichkeit, begruendung = einschaetzung.get(c.part_id) or (
-                bedarf.regel_dringlichkeit(c),
+                bedarf.regel_dringlichkeit(c, heute),
                 bedarf.regel_begruendung(c),
             )
+            # Ein naher Liefertermin gilt auch, wenn die KI es lockerer sieht.
+            dringlichkeit = bedarf.mindestens(dringlichkeit, bedarf.termin_dringlichkeit(c, heute))
             bewertet.append((c, dringlichkeit, begruendung))
-        # Dringendes zuerst anlegen, damit es auch zuerst in die Warteschlange kommt.
-        bewertet.sort(key=lambda x: _RANG.get(x[1], 3))
+        # Dringendes zuerst anlegen, damit es auch zuerst in die Warteschlange
+        # kommt; bei gleicher Dringlichkeit der frueheste Liefertermin zuerst.
+        bewertet.sort(key=lambda x: (_RANG.get(x[1], 3), x[0].termin or date.max))
 
         if vorschau:
             for c, dringlichkeit, begruendung in bewertet:
@@ -336,6 +347,7 @@ class LagerAutodruckService:
                         "dringlichkeit": dringlichkeit,
                         "begruendung": begruendung,
                         "ohne_freigabe": ohne_freigabe,
+                        "termin": c.termin,
                     }
                 )
             await db.commit()
@@ -344,6 +356,9 @@ class LagerAutodruckService:
         angelegt = 0
         wartet = 0
         jetzt = utcnow_naive()
+        # Vorgezogene Drucke je Bereich der Warteschlange - damit mehrere
+        # dringende untereinander ihre Reihenfolge (Liefertermin) behalten.
+        vorne: dict[int | None, int] = defaultdict(int)
         for c, dringlichkeit, begruendung in bewertet:
             regel = regel_je_id[c.regel_id]
             archiv = await db.get(PrintArchive, regel.archive_id)
@@ -358,13 +373,16 @@ class LagerAutodruckService:
                     continue
 
             for _ in range(c.druecke):
+                vorziehen = dringlichkeit == "hoch"
+                if vorziehen:
+                    vorne[regel.printer_id] += 1
                 item = await self._in_warteschlange(
                     db,
                     regel=regel,
                     archiv=archiv,
                     target_model=None if regel.printer_id else target_model,
                     manueller_start=not ohne_freigabe,
-                    vorziehen=dringlichkeit == "hoch",
+                    vorne_an=vorne[regel.printer_id] if vorziehen else None,
                 )
                 # Noch vor dem Commit, sonst koennte die Warteschlange den Druck
                 # starten, bevor die Nachtruhe geprueft ist.
@@ -403,7 +421,7 @@ class LagerAutodruckService:
         archiv: PrintArchive,
         target_model: str | None,
         manueller_start: bool,
-        vorziehen: bool,
+        vorne_an: int | None = None,
     ) -> PrintQueueItem:
         # Gleiche Positionslogik wie beim Anlegen ueber die Warteschlange:
         # je Drucker, bzw. gemeinsam fuer alle nicht zugewiesenen Eintraege.
@@ -411,9 +429,14 @@ class LagerAutodruckService:
             bereich = (PrintQueueItem.printer_id == regel.printer_id, PrintQueueItem.status == "pending")
         else:
             bereich = (PrintQueueItem.printer_id.is_(None), PrintQueueItem.status == "pending")
-        if vorziehen:
-            await db.execute(update(PrintQueueItem).where(*bereich).values(position=PrintQueueItem.position + 1))
-            position = 1
+        if vorne_an is not None:
+            # An Platz vorne_an einreihen, alles ab dort rueckt einen Platz nach hinten.
+            await db.execute(
+                update(PrintQueueItem)
+                .where(*bereich, PrintQueueItem.position >= vorne_an)
+                .values(position=PrintQueueItem.position + 1)
+            )
+            position = vorne_an
         else:
             hoechste = (await db.execute(select(func.max(PrintQueueItem.position)).where(*bereich))).scalar()
             position = (hoechste or 0) + 1
@@ -505,6 +528,135 @@ class LagerAutodruckService:
                 job.status = JOB_ABGEBROCHEN
                 job.finished_at = job.finished_at or item.completed_at or utcnow_naive()
         await db.commit()
+
+    # --- Freigabe ------------------------------------------------------------
+
+    async def job_freigeben(self, db: AsyncSession, job: LagerDruckJob, von: str) -> PrintQueueItem:
+        """Wartenden Auftrag startbereit machen (ohne Commit)."""
+        item = await db.get(PrintQueueItem, job.queue_item_id) if job.queue_item_id else None
+        if job.status != JOB_WARTET or item is None or item.status != "pending":
+            raise FreigabeFehler("Dieser Auftrag wartet nicht (mehr) auf Freigabe.")
+        item.manual_start = False
+        job.status = JOB_GEPLANT
+        job.freigegeben_von = von
+        # Auch ein freigegebener Druck soll nicht in der Nacht fertig werden.
+        self.nachtruhe_fuer_item(await konfig.laden(db), item, utcnow_naive())
+        return item
+
+    async def job_verwerfen(self, db: AsyncSession, job: LagerDruckJob) -> None:
+        """Noch nicht gestarteten Auftrag samt Warteschlangen-Eintrag entfernen (ohne Commit)."""
+        if job.status not in (JOB_WARTET, JOB_GEPLANT):
+            raise FreigabeFehler("Nur Auftraege, die noch nicht drucken, koennen verworfen werden.")
+        item = await db.get(PrintQueueItem, job.queue_item_id) if job.queue_item_id else None
+        if item is not None:
+            if item.status != "pending":
+                raise FreigabeFehler("Der Druck laeuft bereits.")
+            await db.delete(item)
+        job.status = JOB_VERWORFEN
+        job.queue_item_id = None
+        job.finished_at = utcnow_naive()
+
+    async def knopf_ausfuehren(self, daten: str, wer: str) -> str:
+        """Telegram-Knopf: "f:<regel>:<bis_job>", "v:<regel>:<bis_job>" oder "p:<drucker>"."""
+        teile = daten.split(":")
+        try:
+            zahlen = [int(t) for t in teile[1:]]
+        except ValueError:
+            return "Unbekannter Knopf."
+        if teile[0] in ("f", "v") and len(zahlen) == 2:
+            return await self._gruppe_entscheiden(teile[0] == "f", zahlen[0], zahlen[1], wer)
+        if teile[0] == "p" and len(zahlen) == 1:
+            return self._platte_frei(zahlen[0])
+        return "Unbekannter Knopf."
+
+    async def _gruppe_entscheiden(self, freigeben: bool, regel_id: int, bis_job: int, wer: str) -> str:
+        """Alle wartenden Auftraege einer Regel bis zur Nachricht freigeben/verwerfen.
+
+        "bis zur Nachricht": spaeter dazugekommene Auftraege derselben Regel
+        bekommen ihre eigene Nachricht und werden hier nicht mit entschieden.
+        """
+        async with database.async_session() as db:
+            jobs = (
+                (
+                    await db.execute(
+                        select(LagerDruckJob).where(
+                            LagerDruckJob.regel_id == regel_id,
+                            LagerDruckJob.status == JOB_WARTET,
+                            LagerDruckJob.id <= bis_job,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            erledigt = 0
+            for job in jobs:
+                try:
+                    if freigeben:
+                        await self.job_freigeben(db, job, wer)
+                    else:
+                        await self.job_verwerfen(db, job)
+                    erledigt += 1
+                except FreigabeFehler:
+                    continue
+            await db.commit()
+        if not erledigt:
+            return "Schon erledigt - nichts wartet mehr."
+        self.aufwecken()
+        drucke = f"{erledigt} Drucke" if erledigt > 1 else "1 Druck"
+        return f"{drucke} freigegeben" if freigeben else f"{drucke} verworfen"
+
+    def _platte_frei(self, printer_id: int) -> str:
+        from backend.app.services.printer_manager import printer_manager
+
+        if not printer_manager.is_awaiting_plate_clear(printer_id):
+            return "Platte war schon als frei gemeldet."
+        printer_manager.set_awaiting_plate_clear(printer_id, False)
+        logger.info("Lager-Autodruck: Platte von Drucker %s per Telegram freigegeben", printer_id)
+        return "Platte frei - nächster Druck kann starten"
+
+    async def bei_platte_belegt(self, printer_id: int) -> None:
+        """Bambuddy wartet nach einem Druckende auf "Platte frei" (im Hintergrund)."""
+        try:
+            await self._bei_platte_belegt(printer_id)
+        except Exception:  # noqa: BLE001 - darf Bambuddy nie stoeren
+            logger.exception("Lager-Autodruck: Meldung 'Platte abräumen' fehlgeschlagen")
+
+    async def _bei_platte_belegt(self, printer_id: int) -> None:
+        from backend.app.api.routes.settings import get_setting
+
+        async with database.async_session() as db:
+            k = await konfig.laden(db)
+            if "platte" not in k.melden:
+                return
+            # Ohne "Platte bestaetigen" startet Bambuddy den naechsten Druck von
+            # selbst - dann gibt es nichts zu bestaetigen.
+            if (await get_setting(db, "require_plate_clear") or "").lower() != "true":
+                return
+            drucker = await db.get(Printer, printer_id)
+            if drucker is None:
+                return
+            wartend = (
+                await db.execute(
+                    select(func.count(PrintQueueItem.id)).where(
+                        PrintQueueItem.status == "pending",
+                        (PrintQueueItem.printer_id == printer_id) | PrintQueueItem.printer_id.is_(None),
+                    )
+                )
+            ).scalar() or 0
+            titel = f"Druck fertig auf {drucker.name}"
+            text = "Bitte die Druckplatte abräumen."
+            if wartend:
+                text += f" In der Warteschlange: {wartend} Druck{'e' if wartend != 1 else ''}."
+            bots = await telegram.knopf_bots(db, k)
+            angekommen: set[int] = set()
+            if bots:
+                foto = await _kamerabild(printer_id, drucker)
+                markup = telegram.knoepfe([("🧹 Platte ist frei", f"p:{printer_id}")])
+                for bot in bots:
+                    if await telegram.nachricht(bot, f"{titel}\n{text}", markup, foto):
+                        angekommen.add(bot.provider_id)
+            await melden.senden(db, k, "platte", titel, text, ohne=angekommen)
 
     # --- Druckende -----------------------------------------------------------
 
@@ -710,12 +862,30 @@ class LagerAutodruckService:
             j.gemeldet_at = jetzt
         await db.commit()
         if wartend:
+            # Telegram bekommt je Teil eine eigene Nachricht mit Knoepfen,
+            # alle anderen Kanaele eine Sammelnachricht.
+            bots = await telegram.knopf_bots(db, k) if "freigabe" in k.melden else []
+            fehlgeschlagen: set[int] = set()
+            if bots:
+                for regel_id, gruppe in _je_regel(wartend).items():
+                    text = "Freigabe nötig:\n" + _auftragsliste(gruppe)
+                    if gruppe[-1].begruendung:
+                        text += f"\n{gruppe[-1].begruendung}"
+                    bis = gruppe[-1].id
+                    markup = telegram.knoepfe(
+                        [("✅ Freigeben", f"f:{regel_id}:{bis}"), ("🗑 Verwerfen", f"v:{regel_id}:{bis}")]
+                    )
+                    for bot in bots:
+                        if not await telegram.nachricht(bot, text, markup):
+                            fehlgeschlagen.add(bot.provider_id)
             await melden.senden(
                 db,
                 k,
                 "freigabe",
                 "Lager-Autodruck: Freigabe nötig",
                 "Diese Drucke warten in Bambuddy auf deine Freigabe:\n" + _auftragsliste(wartend),
+                # Wo die Knopf-Nachricht nicht ankam, wenigstens die Sammelnachricht.
+                ohne={b.provider_id for b in bots} - fehlgeschlagen,
             )
         if automatisch:
             await melden.senden(
@@ -765,6 +935,26 @@ class LagerAutodruckService:
             )
         self._fehler_in_folge = 0
         self._offline_gemeldet = False
+
+
+def _je_regel(jobs: list[LagerDruckJob]) -> dict[int, list[LagerDruckJob]]:
+    """Wartende Auftraege nach Regel, je Regel nach id sortiert."""
+    gruppen: dict[int, list[LagerDruckJob]] = {}
+    for j in sorted(jobs, key=lambda j: j.id):
+        if j.regel_id is not None:
+            gruppen.setdefault(j.regel_id, []).append(j)
+    return gruppen
+
+
+async def _kamerabild(printer_id: int, drucker: Printer) -> bytes | None:
+    """Kamerabild wie bei Bambuddys Fertig-Benachrichtigung (None, wenn keins)."""
+    try:
+        from backend.app.main import _capture_snapshot_for_notification
+
+        return await _capture_snapshot_for_notification(printer_id, drucker, logger)
+    except Exception:  # noqa: BLE001
+        logger.warning("Lager-Autodruck: Kein Kamerabild fuer Drucker %s", printer_id)
+        return None
 
 
 def _auftragsliste(jobs: list[LagerDruckJob]) -> str:

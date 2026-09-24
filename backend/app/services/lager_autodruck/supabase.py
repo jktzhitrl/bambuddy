@@ -132,7 +132,7 @@ class LagerClient:
         komponenten = await self.lesen("part_components", {"select": "part_id,komponente_id,menge"})
         auftraege = await self.lesen(
             "orders",
-            {"select": "id,status", "geloescht_am": "is.null", "status": "neq.Abgeschlossen"},
+            {"select": "id,status,versand_bis", "geloescht_am": "is.null", "status": "neq.Abgeschlossen"},
         )
         positionen = await self.lesen("order_items", {"select": "order_id,part_id,menge"})
         return {

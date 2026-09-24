@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 SCHLUESSEL = "lager_autodruck"
 # Welche Meldungen standardmaessig verschickt werden (siehe melden.EREIGNISSE).
-MELDEN_STANDARD = ("freigabe", "buchungsfehler", "angehalten", "lager_offline")
+MELDEN_STANDARD = ("freigabe", "platte", "buchungsfehler", "angehalten", "lager_offline")
 GEHEIM = ("passwort", "anthropic_api_key")
 
 
@@ -53,6 +53,8 @@ class Konfig:
     # Benachrichtigungen: IDs von Bambuddy-Kanaelen und welche Meldungen.
     melden_an: list[int] = field(default_factory=list)
     melden: list[str] = field(default_factory=lambda: list(MELDEN_STANDARD))
+    # Telegram-Kanaele bekommen Knoepfe (Freigeben/Verwerfen, Platte frei).
+    telegram_knoepfe: bool = True
 
     def nachtruhe(self) -> Nachtruhe | None:
         if not self.nachtruhe_aktiv:

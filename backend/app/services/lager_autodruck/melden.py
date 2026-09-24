@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 EREIGNISSE = {
     "freigabe": "Druck wartet auf Freigabe",
     "eingeplant": "Druck automatisch eingeplant",
+    "platte": "Druck fertig - Platte abräumen",
     "buchungsfehler": "Buchung kommt nicht im Lager an",
     "angehalten": "Regel angehalten",
     "lager_offline": "Lager nicht erreichbar",
@@ -39,17 +40,25 @@ async def kanaele(db: AsyncSession, ids: list[int]) -> list[NotificationProvider
 
 
 async def senden(
-    db: AsyncSession, k: konfig.Konfig, ereignis: str, titel: str, text: str, *, erzwingen: bool = False
+    db: AsyncSession,
+    k: konfig.Konfig,
+    ereignis: str,
+    titel: str,
+    text: str,
+    *,
+    erzwingen: bool = False,
+    ohne: set[int] | None = None,
 ) -> int:
     """Schickt eine Meldung an die gewaehlten Kanaele; liefert die Anzahl Kanaele.
 
     Fehler beim Senden werden nur protokolliert - eine Benachrichtigung darf
-    den Autodruck nie aufhalten.
+    den Autodruck nie aufhalten. ``ohne``: Kanal-IDs, die schon anders
+    beliefert wurden (Telegram mit Knoepfen).
     """
     if not erzwingen and ereignis not in k.melden:
         return 0
     try:
-        ziele = await kanaele(db, k.melden_an)
+        ziele = [z for z in await kanaele(db, k.melden_an) if z.id not in (ohne or set())]
         if not ziele:
             return 0
         # Spaeter Import: notification_service zieht viel von Bambuddy nach sich.

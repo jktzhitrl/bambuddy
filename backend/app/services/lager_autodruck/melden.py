@@ -23,6 +23,7 @@ EREIGNISSE = {
     "freigabe": "Druck wartet auf Freigabe",
     "eingeplant": "Druck automatisch eingeplant",
     "platte": "Druck fertig - Platte abräumen",
+    "packbar": "Bestellung kann gepackt werden (Packliste)",
     "buchungsfehler": "Buchung kommt nicht im Lager an",
     "angehalten": "Regel angehalten",
     "lager_offline": "Lager nicht erreichbar",

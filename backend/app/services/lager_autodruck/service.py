@@ -17,6 +17,7 @@ seinen Endstatus und das Ergebnis wird als Buchung ins Lager gemeldet.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from collections import defaultdict
@@ -49,7 +50,7 @@ from backend.app.models.lager_autodruck import (
 )
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe, telegram
+from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe, packliste, telegram
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import local_day_start, local_zone, utcnow_naive
 
@@ -66,6 +67,12 @@ BUCHUNG_OK = ("gebucht", "schon_gebucht")
 BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert")
 # Nach so vielen Fehlschlaegen in Folge gibt es eine Benachrichtigung.
 MELDEN_NACH_VERSUCHEN = 3
+
+
+# Mehr neue packbare Bestellungen auf einmal -> eine Sammelnachricht.
+MAX_PACKLISTEN = 3
+# Schon gemeldete packbare Bestellungen (Bambuddy-Tabelle settings).
+PACKBAR_SCHLUESSEL = "lager_autodruck_packbar"
 
 
 class FreigabeFehler(Exception):
@@ -116,6 +123,8 @@ class LagerAutodruckService:
         self._fehler_in_folge = 0
         self._offline_gemeldet = False
         self.telegram = telegram.Rueckkanal(self.knopf_ausfuehren)
+        # Bestellungen, die gerade komplett gepackt werden koennen (fuer die Oberflaeche).
+        self.packbar: list[dict] = []
 
     # --- Lebenszyklus -----------------------------------------------------
 
@@ -197,6 +206,7 @@ class LagerAutodruckService:
                 ergebnis["buchungen_gesendet"] = gesendet
                 await self._lager_wieder_da(db, k)
                 await self.auftraege_melden(db, k)
+                await self.packlisten_pruefen(db, k, lager)
 
             self.letzter_lauf = utcnow_naive()
             self.letzter_fehler = None
@@ -896,6 +906,49 @@ class LagerAutodruckService:
                 "Automatisch in die Warteschlange gestellt:\n" + _auftragsliste(automatisch),
             )
 
+    async def packlisten_pruefen(self, db: AsyncSession, k: konfig.Konfig, lager: LagerClient) -> None:
+        """Bestellungen melden, fuer die jetzt alles im Lager liegt - jede einmal.
+
+        Faellt eine Bestellung wieder heraus (Bestand anderweitig verbraucht)
+        und wird spaeter wieder packbar, kommt die Meldung erneut. Nachts wird
+        nichts geschickt, die Meldung kommt dann zur "Fertig fruehestens"-Zeit.
+        """
+        try:
+            listen = packliste.packbare_auftraege(await lager.lade_packdaten())
+        except LagerFehler as e:
+            logger.warning("Lager-Autodruck: Packliste nicht geprueft: %s", e)
+            return
+        except Exception:  # noqa: BLE001 - die Packliste darf den Autodruck nie aufhalten
+            logger.exception("Lager-Autodruck: Packliste fehlgeschlagen")
+            return
+        self.packbar = [
+            {
+                "order_id": p.order_id,
+                "kunde": p.kunde,
+                "versand_bis": p.versand_bis,
+                "text": packliste.als_text(p),
+            }
+            for p in listen
+        ]
+        gemeldet = await _packbar_gemeldet(db)
+        jetzt_packbar = {p.order_id for p in listen}
+        neu = [p for p in listen if p.order_id not in gemeldet]
+        ruhe = k.nachtruhe()
+        if neu and "packbar" in k.melden and not (ruhe is not None and nachtruhe.ist_nacht(ruhe, utcnow_naive())):
+            if len(neu) > MAX_PACKLISTEN:
+                titel = f"Lager-Autodruck: {len(neu)} Bestellungen können gepackt werden"
+                text = "\n".join(
+                    f"📦 {p.kunde}" + (f" – Versand bis {p.versand_bis:%d.%m.}" if p.versand_bis else "") for p in neu
+                )
+                await melden.senden(db, k, "packbar", titel, text + "\nDetails in der Druckübersicht.")
+            else:
+                for p in neu:
+                    await melden.senden(
+                        db, k, "packbar", "Lager-Autodruck: Bestellung kann gepackt werden", packliste.als_text(p)
+                    )
+            gemeldet |= {p.order_id for p in neu}
+        await _packbar_merken(db, gemeldet & jetzt_packbar)
+
     async def _sperren_melden(
         self, db: AsyncSession, k: konfig.Konfig, gesperrt: dict[int, str], regeln: dict[int, LagerDruckRegel]
     ) -> None:
@@ -935,6 +988,23 @@ class LagerAutodruckService:
             )
         self._fehler_in_folge = 0
         self._offline_gemeldet = False
+
+
+async def _packbar_gemeldet(db: AsyncSession) -> set[str]:
+    from backend.app.api.routes.settings import get_setting
+
+    try:
+        return set(json.loads(await get_setting(db, PACKBAR_SCHLUESSEL) or "[]"))
+    except ValueError:
+        return set()
+
+
+async def _packbar_merken(db: AsyncSession, ids: set[str]) -> None:
+    from backend.app.core.db_dialect import upsert_setting
+    from backend.app.models.settings import Settings
+
+    await upsert_setting(db, Settings, PACKBAR_SCHLUESSEL, json.dumps(sorted(ids)))
+    await db.commit()
 
 
 def _je_regel(jobs: list[LagerDruckJob]) -> dict[int, list[LagerDruckJob]]:

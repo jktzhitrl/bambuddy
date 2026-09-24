@@ -254,12 +254,16 @@ class FakeLager:
         self.teile = teile
         self.auftraege = []
         self.positionen = []
+        self.packdaten = {}
         self.buchungen = []
         self.fehler = False
         self.antwort = "gebucht"
 
     async def lade_bestandsdaten(self):
         return _daten(self.teile, auftraege=self.auftraege, positionen=self.positionen)
+
+    async def lade_packdaten(self):
+        return {"teile": self.teile, "auftraege": self.auftraege, "positionen": self.positionen, **self.packdaten}
 
     async def druck_verbuchen(self, **kw):
         if self.fehler:
@@ -1041,3 +1045,154 @@ async def test_rueckkanal_fehler_von_telegram():
     bot = telegram.Bot(provider_id=1, token="123:abc", chat_id="42")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assert await telegram.Rueckkanal(ausfuehren).abholen(client, [bot]) is False
+
+
+# --- Packliste ---------------------------------------------------------------------
+
+
+def _packdaten(**kw):
+    daten = {
+        "teile": [
+            {"id": "halter", "name": "Halter", "bestand": 5, "lagerort": "Dachboden"},
+            {"id": "ring", "name": "Ring", "bestand": 20},
+            {"id": "set", "name": "System", "bestand": 1},
+        ],
+        "komponenten": [
+            {"part_id": "set", "komponente_id": "halter", "menge": 1},
+            {"part_id": "set", "komponente_id": "ring", "menge": 9},
+        ],
+        "lagerorte": [
+            {"part_id": "ring", "ort": "Regal B3", "menge": 20},
+            {"part_id": "ring", "ort": "leer", "menge": 0},
+        ],
+        "kameras": [{"typ": "IMX179", "bestand": 6}],
+        "auftraege": [],
+        "positionen": [],
+        "sonderposten": [],
+    }
+    daten.update(kw)
+    return daten
+
+
+def test_packliste_set_aus_lager_und_aus_einzelteilen():
+    from backend.app.services.lager_autodruck import packliste
+
+    daten = _packdaten(
+        auftraege=[
+            {
+                "id": "a",
+                "kunde": "Müller",
+                "status": "Offen",
+                "versand_bis": "2026-10-01",
+                "kamera": "IMX179",
+                "system_anzahl": 2,
+            }
+        ],
+        positionen=[
+            {"order_id": "a", "part_id": "set", "menge": 2},
+            {"order_id": "a", "part_id": "halter", "menge": 1},
+        ],
+        sonderposten=[{"order_id": "a", "beschreibung": "Montage", "menge": 1}],
+    )
+    (p,) = packliste.packbare_auftraege(daten)
+    assert (p.kunde, p.versand_bis, p.kameras) == ("Müller", date(2026, 10, 1), ("IMX179", 6))  # 2 Systeme x 3
+    system, halter = p.positionen
+    assert system.aus_lager == 1 and system.zusammenbauen == [
+        ("Halter", 1, ["Dachboden"]),
+        ("Ring", 9, ["Regal B3 (20)"]),
+    ]
+    assert halter.orte == ["Dachboden"]
+    text = packliste.als_text(p)
+    assert "📦 Müller – Versand bis 01.10." in text
+    assert "1 fertig im Lager, 1 zusammenbauen aus:" in text
+    assert "– 9× Ring – Regal B3 (20)" in text
+    assert "6× Kamera IMX179" in text and "1× Montage (Sonderposten" in text
+
+
+def test_packliste_fehlendes_oder_zu_wenig_nicht_packbar():
+    from backend.app.services.lager_autodruck import packliste
+
+    auftraege = [
+        {"id": "zu_viel", "kunde": "A", "status": "Offen", "versand_bis": "2026-10-01"},
+        {"id": "kamera", "kunde": "B", "status": "Offen", "kamera": "IMX179", "system_anzahl": 3},
+        {"id": "unbekannt", "kunde": "C", "status": "Offen"},
+        {"id": "nur_sonder", "kunde": "D", "status": "Offen"},
+    ]
+    positionen = [
+        {"order_id": "zu_viel", "part_id": "halter", "menge": 6},
+        {"order_id": "kamera", "part_id": "ring", "menge": 1},
+        {"order_id": "unbekannt", "part_id": "gibtsnicht", "menge": 1},
+    ]
+    daten = _packdaten(auftraege=auftraege, positionen=positionen)
+    assert packliste.packbare_auftraege(daten) == []  # 9 Kameras gebraucht, 6 da
+
+
+def test_packliste_verteilt_bestand_nach_termin_und_fertig_zuerst():
+    from backend.app.services.lager_autodruck import packliste
+
+    auftraege = [
+        {"id": "spaet", "kunde": "Spät", "status": "Offen", "versand_bis": "2026-10-20"},
+        {"id": "frueh", "kunde": "Früh", "status": "In Arbeit", "versand_bis": "2026-10-02"},
+        {"id": "gepackt", "kunde": "Gepackt", "status": "Fertig", "versand_bis": "2026-12-01"},
+        {"id": "gross", "kunde": "Groß", "status": "Offen", "versand_bis": "2026-09-30"},
+    ]
+    positionen = [
+        {"order_id": "spaet", "part_id": "halter", "menge": 2},
+        {"order_id": "frueh", "part_id": "halter", "menge": 2},
+        {"order_id": "gepackt", "part_id": "halter", "menge": 2},
+        {"order_id": "gross", "part_id": "halter", "menge": 50},
+    ]
+    listen = packliste.packbare_auftraege(_packdaten(auftraege=auftraege, positionen=positionen))
+    # 5 Halter: 2 liegen schon gepackt, "Groß" geht nicht auf und hält nichts fest,
+    # dann bekommt der frühere Termin die restlichen 3 - für "Spät" reicht es nicht mehr.
+    assert [p.kunde for p in listen] == ["Früh"]
+
+
+async def test_packliste_meldet_jede_bestellung_einmal(umgebung, gemeldet, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    k = await konfig.laden(db_session)
+    k.melden = [*k.melden, "packbar"]
+    await konfig.speichern(db_session, k)
+    lager.teile = [{"id": "teil-1", "name": "Halter", "bestand": 10, "mindestbestand": 0}]
+    lager.auftraege = [{"id": "o1", "kunde": "Müller", "status": "Offen"}]
+    lager.positionen = [{"order_id": "o1", "part_id": "teil-1", "menge": 2}]
+
+    await service.durchlauf()
+    ((ereignis, titel, text, _),) = gemeldet
+    assert ereignis == "lager_autodruck_packbar" and "Müller" in text and "2× Halter" in text
+    assert service.packbar[0]["kunde"] == "Müller"
+    await service.durchlauf()
+    assert len(gemeldet) == 1
+
+    # Bestand reicht nicht mehr -> vergessen; wieder genug -> neue Meldung.
+    lager.teile[0]["bestand"] = 1
+    await service.durchlauf()
+    assert service.packbar == []
+    lager.teile[0]["bestand"] = 5
+    await service.durchlauf()
+    assert len(gemeldet) == 2
+
+
+async def test_packliste_viele_auf_einmal_als_sammelnachricht(umgebung, gemeldet, db_session):
+    service, lager, drucker, archiv, sessions = umgebung
+    k = await konfig.laden(db_session)
+    k.melden = [*k.melden, "packbar"]
+    await konfig.speichern(db_session, k)
+    lager.teile = [{"id": "teil-1", "name": "Halter", "bestand": 10, "mindestbestand": 0}]
+    lager.auftraege = [{"id": f"o{i}", "kunde": f"Kunde {i}", "status": "Offen"} for i in range(4)]
+    lager.positionen = [{"order_id": f"o{i}", "part_id": "teil-1", "menge": 1} for i in range(4)]
+    await service.durchlauf()
+    ((_, titel, text, _),) = gemeldet
+    assert titel == "Lager-Autodruck: 4 Bestellungen können gepackt werden"
+    assert text.count("📦") == 4
+
+
+async def test_packliste_fehler_haelt_durchlauf_nicht_auf(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+
+    async def kaputt():
+        raise LagerFehler("offline")
+
+    lager.lade_packdaten = kaputt
+    ergebnis = await service.durchlauf()
+    assert ergebnis["ergebnis"] != "Fehler"

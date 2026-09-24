@@ -142,6 +142,32 @@ class LagerClient:
             "positionen": positionen,
         }
 
+    async def lade_packdaten(self) -> dict[str, list[dict]]:
+        """Alles fuer die Packliste (Bestellungen, die komplett gepackt werden koennen)."""
+        teile = await self.lesen("parts", {"select": "id,name,bestand,lagerort", "geloescht_am": "is.null"})
+        komponenten = await self.lesen("part_components", {"select": "part_id,komponente_id,menge"})
+        lagerorte = await self.lesen("part_lagerorte", {"select": "part_id,ort,menge"})
+        kameras = await self.lesen("cameras", {"select": "typ,bestand", "geloescht_am": "is.null"})
+        auftraege = await self.lesen(
+            "orders",
+            {
+                "select": "id,kunde,status,versand_bis,bestelldatum,kamera,system_anzahl",
+                "geloescht_am": "is.null",
+                "status": 'in.("Offen","In Arbeit","Fertig")',
+            },
+        )
+        positionen = await self.lesen("order_items", {"select": "order_id,part_id,menge", "order": "position"})
+        sonderposten = await self.lesen("order_sonderposten", {"select": "order_id,beschreibung,menge"})
+        return {
+            "teile": teile,
+            "komponenten": komponenten,
+            "lagerorte": lagerorte,
+            "kameras": kameras,
+            "auftraege": auftraege,
+            "positionen": positionen,
+            "sonderposten": sonderposten,
+        }
+
     async def lade_teile(self) -> list[dict]:
         return await self.lesen(
             "parts",

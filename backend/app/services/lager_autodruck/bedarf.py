@@ -78,6 +78,7 @@ class Uebersicht:
     in_arbeit: float
     hinweis: str | None = None
     termin: date | None = None
+    gesperrt: float = 0.0  # in gesperrten Lagerorten, nicht in "bestand" enthalten
 
 
 def datum(wert: object) -> date | None:
@@ -88,6 +89,20 @@ def datum(wert: object) -> date | None:
         return date.fromisoformat(str(wert)[:10])
     except ValueError:
         return None
+
+
+def gesperrt_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
+    """Menge in gesperrten Lagerorten je Teil - zaehlt nicht als verfuegbar."""
+    ergebnis: dict[str, float] = {}
+    for zeile in daten.get("gesperrt", []):
+        teil = str(zeile.get("part_id"))
+        ergebnis[teil] = ergebnis.get(teil, 0.0) + max(0.0, zahl(zeile.get("menge")))
+    return ergebnis
+
+
+def verfuegbarer_bestand(teil: dict, gesperrt: dict[str, float]) -> float:
+    """Bestand ohne gesperrte Lagerorte (nie unter 0)."""
+    return max(0.0, zahl(teil.get("bestand")) - gesperrt.get(str(teil.get("id")), 0.0))
 
 
 def nachfrage_je_teil(daten: dict[str, list[dict]]) -> dict[str, float]:
@@ -112,8 +127,9 @@ def bedarf_je_teil(daten: dict[str, list[dict]]) -> tuple[dict[str, float], dict
         komponenten_je_set.setdefault(str(k.get("part_id")), []).append(
             (str(k.get("komponente_id")), zahl(k.get("menge")))
         )
+    gesperrt = gesperrt_je_teil(daten)
     set_bestand = {
-        str(t.get("id")): max(0.0, zahl(t.get("bestand")))
+        str(t.get("id")): verfuegbarer_bestand(t, gesperrt)
         for t in daten.get("teile", [])
         if str(t.get("id")) in komponenten_je_set
     }
@@ -157,6 +173,7 @@ def berechne(
     teile = {str(t.get("id")): t for t in daten.get("teile", [])}
     sets = {str(k.get("part_id")) for k in daten.get("komponenten", [])}
     nachfrage, termine = bedarf_je_teil(daten)
+    gesperrt = gesperrt_je_teil(daten)
 
     kandidaten: list[Kandidat] = []
     uebersicht: list[Uebersicht] = []
@@ -174,10 +191,21 @@ def berechne(
             continue
 
         name = str(teil.get("name") or regel.part_id)
-        bestand = zahl(teil.get("bestand"))
+        # Gesperrte Lagerorte zaehlen nicht: "Bestand" ist hier der verfuegbare.
+        bestand = verfuegbarer_bestand(teil, gesperrt)
         mindest = zahl(teil.get("mindestbestand"))
         termin = termine.get(regel.part_id)
-        eintrag = Uebersicht(regel.regel_id, regel.part_id, name, bestand, mindest, bedarf, arbeit, termin=termin)
+        eintrag = Uebersicht(
+            regel.regel_id,
+            regel.part_id,
+            name,
+            bestand,
+            mindest,
+            bedarf,
+            arbeit,
+            termin=termin,
+            gesperrt=gesperrt.get(regel.part_id, 0.0),
+        )
         uebersicht.append(eintrag)
 
         if regel.part_id in sets:

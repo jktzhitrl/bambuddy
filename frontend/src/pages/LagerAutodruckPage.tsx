@@ -46,6 +46,42 @@ function zeit(iso: string | null | undefined) {
   return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+// Zahlenfeld, das sich leeren laesst: waehrend des Tippens bleibt der Text
+// stehen (auch leer), erst beim Verlassen wird auf min begrenzt. Sonst
+// springt die Zahl auf dem Tablet sofort zurueck, wenn man sie loescht.
+export function ZahlFeld({
+  wert, min, leerErlaubt = false, onWert, className, disabled,
+}: {
+  wert: number | null;
+  min: number;
+  leerErlaubt?: boolean;
+  onWert: (n: number | null) => void;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={min}
+      className={className}
+      disabled={disabled}
+      value={text ?? (wert ?? '')}
+      onChange={e => {
+        const t = e.target.value;
+        setText(t);
+        if (t !== '' && Number.isFinite(Number(t))) onWert(Math.max(min, Number(t)));
+      }}
+      onBlur={() => {
+        if (text === null) return;
+        if (text === '' || !Number.isFinite(Number(text))) onWert(leerErlaubt ? null : min);
+        setText(null);
+      }}
+    />
+  );
+}
+
 function dauer(sekunden: number) {
   const h = Math.floor(sekunden / 3600);
   const m = Math.round((sekunden % 3600) / 60);
@@ -534,7 +570,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
             <input className={EINGABE} value={r.dateiname} onChange={e => setze('dateiname', e.target.value)} />
           </Feld>
           <Feld titel="Stück pro Druck">
-            <input type="number" min={1} className={EINGABE} value={r.stueck_je_druck} onChange={e => setze('stueck_je_druck', Math.max(1, Number(e.target.value) || 1))} />
+            <ZahlFeld min={1} className={EINGABE} wert={r.stueck_je_druck} onWert={n => setze('stueck_je_druck', n ?? 1)} />
           </Feld>
         </div>
 
@@ -588,7 +624,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
 
         <div className="grid md:grid-cols-2 gap-4">
           <Feld titel="Höchstens Drucke pro Tag" hilfe="Leer = kein Limit. Wann gestartet wird, regelt „Druckende optimieren“ in den Einstellungen.">
-            <input type="number" min={0} className={EINGABE} value={r.max_drucke_pro_tag ?? ''} onChange={e => setze('max_drucke_pro_tag', e.target.value === '' ? null : Math.max(0, Number(e.target.value)))} />
+            <ZahlFeld min={0} leerErlaubt className={EINGABE} wert={r.max_drucke_pro_tag ?? null} onWert={n => setze('max_drucke_pro_tag', n)} />
           </Feld>
           {gewaehltesArchiv?.druckzeit_s ? (
             <div className="text-sm text-bambu-gray self-center">Druckdauer laut Datei: {dauer(gewaehltesArchiv.druckzeit_s)}</div>
@@ -731,7 +767,7 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
             <Toggle checked={k.alle_drucke_verbuchen} onChange={v => setze('alle_drucke_verbuchen', v)} disabled={!darfAendern} />
           </div>
           <Feld titel="Bestand prüfen alle … Minuten">
-            <input type="number" min={1} className={EINGABE} value={k.intervall_minuten} disabled={!darfAendern} onChange={e => setze('intervall_minuten', Math.max(1, Number(e.target.value) || 1))} />
+            <ZahlFeld min={1} className={EINGABE} wert={k.intervall_minuten} disabled={!darfAendern} onWert={n => setze('intervall_minuten', n ?? 1)} />
           </Feld>
         </CardContent>
       </Card>
@@ -758,7 +794,7 @@ function EinstellungenFormular({ start, darfAendern }: { start: Konfig; darfAend
               <input type="time" className={EINGABE} value={k.aufstehen} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('aufstehen', e.target.value)} />
             </Feld>
             <Feld titel="Puffer (Minuten)" hilfe="Für Aufheizen und falls der Druck länger dauert als geschätzt">
-              <input type="number" min={0} className={EINGABE} value={k.puffer_minuten} disabled={!darfAendern || !k.nachtruhe_aktiv} onChange={e => setze('puffer_minuten', Math.max(0, Number(e.target.value) || 0))} />
+              <ZahlFeld min={0} className={EINGABE} wert={k.puffer_minuten} disabled={!darfAendern || !k.nachtruhe_aktiv} onWert={n => setze('puffer_minuten', n ?? 0)} />
             </Feld>
           </div>
         </CardContent>

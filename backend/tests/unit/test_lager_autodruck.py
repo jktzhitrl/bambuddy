@@ -1234,3 +1234,58 @@ def test_packliste_nimmt_nichts_aus_gesperrten_orten():
     # 5 Halter, 3 davon gesperrt: nur "A" geht auf, und die Garage wird nicht genannt.
     (p,) = packliste.packbare_auftraege(daten)
     assert p.kunde == "A" and p.positionen[0].orte == ["Dachboden (2)"]
+
+
+# --- Fuss-Varianten ---------------------------------------------------------------
+
+
+def _fuss_daten(set_bestand=0, variante="f20"):
+    return _daten(
+        [
+            {"id": "std", "name": "Fuß Standard ", "bestand": 50, "mindestbestand": 3},
+            {"id": "f20", "name": "Fuß +20", "bestand": 2, "mindestbestand": 0},
+            {"id": "ring", "name": "Ring Element", "bestand": 40},
+            {"id": "sys", "name": "Autodarts System", "bestand": set_bestand},
+        ],
+        komponenten=[
+            {"part_id": "sys", "komponente_id": "std", "menge": 3},
+            {"part_id": "sys", "komponente_id": "ring", "menge": 9},
+        ],
+        auftraege=[{"id": "o", "status": "Offen", "kunde": "K", "fuss_variante": variante}],
+        positionen=[{"order_id": "o", "part_id": "sys", "menge": 1}],
+    )
+
+
+def test_fuss_variante_ersetzt_standard_im_bedarf():
+    assert bedarf.ist_fuss({"name": "Fuß Standard "}) and bedarf.ist_fuss({"name": "Fuss +20"})
+    assert not bedarf.ist_fuss({"name": "Fussel"}) and not bedarf.ist_fuss(None)
+    assert bedarf.nachfrage_je_teil(_fuss_daten(variante=None)) == {"std": 3, "ring": 9}
+    assert bedarf.nachfrage_je_teil(_fuss_daten()) == {"f20": 3, "ring": 9}
+    # Fertiges Set im Regal: die +20-Fuesse werden zum Tauschen gebraucht.
+    assert bedarf.nachfrage_je_teil(_fuss_daten(set_bestand=1)) == {"f20": 3}
+    # Unbekannte oder ungueltige Variante (kein Fuss) = Standard.
+    assert bedarf.nachfrage_je_teil(_fuss_daten(variante="ring")) == {"std": 3, "ring": 9}
+
+    # Autodruck: +20 hat nur 2, gebraucht werden 3 -> Nachdruck faellig.
+    (k,), _ = bedarf.berechne(_fuss_daten(), [_regel("f20")], {})
+    assert (k.part_id, k.nachfrage, k.verfuegbar) == ("f20", 3, -1)
+
+
+def test_packliste_mit_fuss_variante():
+    from backend.app.services.lager_autodruck import packliste
+
+    daten = _fuss_daten()
+    daten["teile"][1]["bestand"] = 5
+    (p,) = packliste.packbare_auftraege(daten)
+    assert ("Fuß +20", 3, []) in p.positionen[0].zusammenbauen
+    assert all(t[0] != "Fuß Standard " for t in p.positionen[0].zusammenbauen)
+
+    # Fertiges Set aus dem Regal: Fuesse tauschen.
+    daten = _fuss_daten(set_bestand=1)
+    daten["teile"][1]["bestand"] = 5
+    (p,) = packliste.packbare_auftraege(daten)
+    assert p.positionen[0].fuesse_tauschen == [("Fuß Standard ", "Fuß +20", 3, [])]
+    assert "Füße tauschen: 3× Fuß Standard raus, 3× Fuß +20 rein" in packliste.als_text(p)
+
+    # Zu wenig +20-Fuesse: nicht packbar.
+    assert packliste.packbare_auftraege(_fuss_daten(set_bestand=1)) == []

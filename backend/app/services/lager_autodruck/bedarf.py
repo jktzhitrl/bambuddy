@@ -20,6 +20,7 @@ bestimmt die Reihenfolge in der Warteschlange.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import date
 
@@ -81,6 +82,22 @@ class Uebersicht:
     gesperrt: float = 0.0  # in gesperrten Lagerorten, nicht in "bestand" enthalten
 
 
+_FUSS = re.compile(r"^fu(ß|ss)(\s|$)", re.IGNORECASE)
+
+
+def ist_fuss(teil: dict | None) -> bool:
+    """Fuss-Baugruppe (Name beginnt mit "Fuß"/"Fuss") - wie istFuss im Lager."""
+    return bool(teil) and bool(_FUSS.match(str(teil.get("name") or "").strip()))
+
+
+def fuss_variante(auftrag: dict, teile: dict[str, dict], sets: set[str] | dict) -> str | None:
+    """Gewaehlte Fussgroesse einer Bestellung (None = Standard wie im Set)."""
+    tid = str(auftrag.get("fuss_variante") or "")
+    if tid and tid in teile and tid not in sets and ist_fuss(teile[tid]):
+        return tid
+    return None
+
+
 def datum(wert: object) -> date | None:
     """ "2026-09-30" oder "2026-09-30T00:00:00+00:00" -> date; sonst None."""
     if not wert:
@@ -136,23 +153,39 @@ def bedarf_je_teil(daten: dict[str, list[dict]]) -> tuple[dict[str, float], dict
 
     nachfrage: dict[str, float] = {}
     termine: dict[str, date] = {}
+    teile = {str(t.get("id")): t for t in daten.get("teile", [])}
 
-    def verteilen(teil: str, menge: float, pfad: tuple[str, ...], termin: date | None) -> None:
+    def verteilen(teil: str, menge: float, pfad: tuple[str, ...], termin: date | None, variante: str | None) -> None:
         bestandteile = komponenten_je_set.get(teil)
         if not bestandteile or teil in pfad:  # Einzelteil (oder Kreis - dann nicht weiter zerlegen)
+            # Andere Fussgroesse bestellt: statt des Standard-Fusses diese.
+            if variante and pfad and ist_fuss(teile.get(teil)):
+                teil = variante
             nachfrage[teil] = nachfrage.get(teil, 0.0) + menge
             if termin is not None and (teil not in termine or termin < termine[teil]):
                 termine[teil] = termin
             return
         vom_lager = min(menge, set_bestand.get(teil, 0.0))
         set_bestand[teil] = set_bestand.get(teil, 0.0) - vom_lager
+        if variante and vom_lager > 0:
+            # Fertiges Set mit Standard-Fuessen: die gewaehlten Fuesse werden
+            # zum Tauschen gebraucht (die Standard-Fuesse zaehlen wir bewusst
+            # nicht zurueck - lieber einer zu viel als zu wenig gedruckt).
+            for komponente, je_set in bestandteile:
+                if komponente != variante and ist_fuss(teile.get(komponente)):
+                    nachfrage[variante] = nachfrage.get(variante, 0.0) + vom_lager * je_set
+                    if termin is not None and (variante not in termine or termin < termine[variante]):
+                        termine[variante] = termin
         rest = menge - vom_lager
         if rest <= 0:
             return
         for komponente, je_set in bestandteile:
-            verteilen(komponente, rest * je_set, pfad + (teil,), termin)
+            verteilen(komponente, rest * je_set, pfad + (teil,), termin, variante)
 
     termin_je_auftrag = {str(a.get("id")): datum(a.get("versand_bis")) for a in daten.get("auftraege", [])}
+    variante_je_auftrag = {
+        str(a.get("id")): fuss_variante(a, teile, komponenten_je_set) for a in daten.get("auftraege", [])
+    }
     positionen = [
         p
         for p in daten.get("positionen", [])
@@ -161,7 +194,14 @@ def bedarf_je_teil(daten: dict[str, list[dict]]) -> tuple[dict[str, float], dict
     # Frueheste Termine zuerst, ohne Termin zuletzt.
     positionen.sort(key=lambda p: termin_je_auftrag[str(p.get("order_id"))] or date.max)
     for pos in positionen:
-        verteilen(str(pos.get("part_id")), zahl(pos.get("menge")), (), termin_je_auftrag[str(pos.get("order_id"))])
+        auftrag = str(pos.get("order_id"))
+        verteilen(
+            str(pos.get("part_id")),
+            zahl(pos.get("menge")),
+            (),
+            termin_je_auftrag[auftrag],
+            variante_je_auftrag[auftrag],
+        )
     return nachfrage, termine
 
 

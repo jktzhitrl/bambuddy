@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from backend.app.services.lager_autodruck.bedarf import datum, zahl
+from backend.app.services.lager_autodruck.bedarf import datum, fuss_variante, ist_fuss, zahl
 
 KAMERAS_PRO_SYSTEM = 3
 OFFEN = ("Offen", "In Arbeit")
@@ -31,6 +31,8 @@ class Position:
     # Aus Einzelteilen zusammenzubauen: [(Name, Menge, Orte)]
     zusammenbauen: list[tuple[str, float, list[str]]] = field(default_factory=list)
     aus_lager: float = 0  # davon fertig im Regal
+    # Fertige Sets mit anderer Fussgroesse: [(Standard-Fuss, gewaehlter Fuss, Menge, Orte)]
+    fuesse_tauschen: list[tuple[str, str, float, list[str]]] = field(default_factory=list)
 
 
 @dataclass
@@ -94,6 +96,7 @@ def packbare_auftraege(daten: dict[str, list[dict]]) -> list[Packliste]:
             return bestand.get(tid, 0.0) - abzug.get(tid, 0.0)
 
         liste: list[Position] = []
+        variante = fuss_variante(auftrag, teile, komponenten)
         for pos in positionen_je_auftrag.get(str(auftrag.get("id")), []):
             tid = str(pos.get("part_id") or "")
             menge = zahl(pos.get("menge"))
@@ -106,11 +109,24 @@ def packbare_auftraege(daten: dict[str, list[dict]]) -> list[Packliste]:
             if aus_lager > 0:
                 abzug[tid] = abzug.get(tid, 0.0) + aus_lager
             eintrag.aus_lager = aus_lager
+            if variante and aus_lager > 0 and tid in komponenten:
+                # Fertige Sets haben Standard-Fuesse: gegen die bestellte Groesse tauschen.
+                for kid, je_set in komponenten[tid]:
+                    if kid == variante or not ist_fuss(teile.get(kid)):
+                        continue
+                    tausch = je_set * aus_lager
+                    if noch_da(variante) < tausch:
+                        return None
+                    abzug[variante] = abzug.get(variante, 0.0) + tausch
+                    abzug[kid] = abzug.get(kid, 0.0) - tausch  # Standard-Fuesse kommen zurueck
+                    eintrag.fuesse_tauschen.append((name(kid), name(variante), tausch, orte(variante)))
             offen = menge - aus_lager
             if offen > 0:
                 if tid not in komponenten:
                     return None
                 for kid, je_set in komponenten[tid]:
+                    if variante and ist_fuss(teile.get(kid)):
+                        kid = variante  # bestellte Fussgroesse statt Standard
                     gebraucht = je_set * offen
                     if gebraucht <= 0:
                         continue
@@ -192,6 +208,9 @@ def als_text(p: Packliste) -> str:
             for teil, menge, orte in pos.zusammenbauen:
                 wo = f" – {', '.join(orte)}" if orte else ""
                 zeilen.append(f"   – {menge:g}× {teil}{wo}")
+        for alt, neu, menge, orte in pos.fuesse_tauschen:
+            wo = f" – {', '.join(orte)}" if orte else ""
+            zeilen.append(f"   Füße tauschen: {menge:g}× {alt.strip()} raus, {menge:g}× {neu.strip()} rein{wo}")
     if p.kameras:
         zeilen.append(f"• {p.kameras[1]:g}× Kamera {p.kameras[0]}")
     for s in p.sonderposten:

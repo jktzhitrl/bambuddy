@@ -43,6 +43,12 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   *niedrig*. Optional (Schalter „KI-Einschätzung verwenden“, standardmäßig
   aus) bewertet stattdessen Claude, mit Begründung; das kostet pro Aufruf
   etwas über den eigenen Anthropic-Schlüssel.
+- **Fuß-Varianten**: In den Sets steckt „Fuß Standard“. Wählt eine Bestellung in
+  der Lagersoftware eine andere Fußgröße (Feld „Füße“; als Fuß gilt jede
+  Baugruppe, deren Name mit „Fuß“ beginnt), rechnet der Autodruck für diese
+  Bestellung mit der gewählten Größe statt Standard – auch zum Tauschen, wenn ein
+  fertiges Set aus dem Regal genommen wird. Die Packliste baut mit der gewählten
+  Größe bzw. zeigt „Füße tauschen: 3× Fuß Standard raus, 3× Fuß +20 rein“.
 - **Gesperrte Lagerorte**: In der Lagersoftware kann jeder Lagerort eines Teils
   gesperrt werden (Schloss im Teile-Formular). Diese Menge zählt nicht als
   verfügbar: Die Übersicht zeigt sie als „(+6 🔒)“ neben dem Bestand, der

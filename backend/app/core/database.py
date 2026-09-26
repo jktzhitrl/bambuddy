@@ -1753,6 +1753,14 @@ async def run_migrations(conn):
     # half-converted column.
     await _migrate_failure_reason_vocabulary(conn)
 
+    # Fork: Lager-Autodruck - Regeln koennen eine Datei aus dem Dateimanager
+    # drucken statt nur aus dem Archiv.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE lager_druck_regeln ADD COLUMN library_file_id INTEGER "
+        "REFERENCES library_files(id) ON DELETE SET NULL",
+    )
+
     # Migration: Add parent_run_id column to pipeline_runs (#1425 PR C).
     # Links a retry-failed run back to its parent so the dashboard can show
     # "Retry of run #N" inline. Idempotent on both SQLite and Postgres.

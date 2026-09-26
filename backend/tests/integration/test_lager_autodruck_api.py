@@ -144,3 +144,36 @@ async def test_benachrichtigung_kanaele_und_test(async_client, db_session):
     ) as gesendet:
         antwort = (await async_client.post(f"{BASIS}/benachrichtigung/testen")).json()
     assert antwort["ok"] is True and gesendet.await_count == 1
+
+
+async def test_regel_mit_datei_aus_dem_dateimanager(async_client, db_session):
+    from backend.app.models.library import LibraryFile
+
+    gesliced = LibraryFile(
+        filename="Arme.gcode.3mf",
+        file_path="l/a.3mf",
+        file_type="3mf",
+        file_size=1,
+        file_metadata={"sliced_for_model": "P1S", "print_time_seconds": 3600, "filament_used_grams": 220},
+    )
+    projekt = LibraryFile(filename="Arme-Projekt.3mf", file_path="l/p.3mf", file_type="3mf", file_size=1)
+    db_session.add_all([gesliced, projekt])
+    await db_session.commit()
+
+    # Nur geslicte Dateien stehen zur Auswahl.
+    liste = (await async_client.get(f"{BASIS}/dateien")).json()
+    assert [d["id"] for d in liste] == [gesliced.id]
+    assert liste[0]["name"] == "Arme" and liste[0]["modell"] == "P1S"
+
+    antwort = await async_client.post(f"{BASIS}/regeln", json={"part_id": "arm", "library_file_id": gesliced.id})
+    assert antwort.status_code == 200, antwort.text
+    assert antwort.json()["dateiname"] == "Arme" and antwort.json()["library_file_id"] == gesliced.id
+
+    ungesliced = await async_client.post(f"{BASIS}/regeln", json={"part_id": "b", "library_file_id": projekt.id})
+    assert ungesliced.status_code == 400
+
+    archiv = await _archiv(db_session)
+    beides = await async_client.post(
+        f"{BASIS}/regeln", json={"part_id": "c", "library_file_id": gesliced.id, "archive_id": archiv.id}
+    )
+    assert beides.status_code == 400

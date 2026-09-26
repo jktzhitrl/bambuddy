@@ -56,6 +56,7 @@ export interface Regel {
   part_id: string;
   part_name: string | null;
   archive_id: number | null;
+  library_file_id: number | null;
   plate_id: number | null;
   dateiname: string;
   stueck_je_druck: number;
@@ -178,6 +179,7 @@ export const lagerAutodruckApi = {
   pruefen: () => anfrage<Record<string, unknown>>('/pruefen', { method: 'POST' }),
   teile: () => anfrage<LagerTeil[]>('/teile'),
   archive: (q: string) => anfrage<ArchivAuswahl[]>(`/archive?q=${encodeURIComponent(q)}`),
+  dateien: (q: string) => anfrage<ArchivAuswahl[]>(`/dateien?q=${encodeURIComponent(q)}`),
   drucker: () => anfrage<DruckerAuswahl[]>('/drucker'),
   regeln: () => anfrage<Regel[]>('/regeln'),
   regelSpeichern: (r: Regel) =>

@@ -30,6 +30,7 @@ from backend.app.models.lager_autodruck import (
     LagerDruckJob,
     LagerDruckRegel,
 )
+from backend.app.models.library import LibraryFile
 from backend.app.models.notification import NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -37,7 +38,9 @@ from backend.app.models.user import User
 from backend.app.services.lager_autodruck import konfig, melden, nachtruhe
 from backend.app.services.lager_autodruck.service import (
     FreigabeFehler,
+    bibliothek_druckbar,
     dateiname_aus_archiv,
+    dateiname_aus_bibliothek,
     lager_autodruck_service,
 )
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
@@ -235,6 +238,33 @@ async def archive_suchen(
     ]
 
 
+@router.get("/dateien")
+async def dateien_suchen(
+    q: str = Query("", max_length=100),
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
+):
+    """Geslicte Dateien aus dem Dateimanager - muessen noch nie gedruckt worden sein."""
+    abfrage = select(LibraryFile).where(LibraryFile.deleted_at.is_(None)).order_by(LibraryFile.id.desc()).limit(200)
+    if q.strip():
+        abfrage = abfrage.where(LibraryFile.filename.ilike(f"%{q.strip()}%"))
+    dateien = [d for d in (await db.execute(abfrage)).scalars().all() if bibliothek_druckbar(d)][:50]
+    antwort = []
+    for d in dateien:
+        meta = d.file_metadata or {}
+        antwort.append(
+            {
+                "id": d.id,
+                "name": dateiname_aus_bibliothek(d),
+                "filename": d.filename,
+                "modell": meta.get("sliced_for_model"),
+                "gramm": meta.get("filament_used_grams"),
+                "druckzeit_s": meta.get("print_time_seconds"),
+            }
+        )
+    return antwort
+
+
 @router.get("/drucker")
 async def drucker_lesen(
     db: AsyncSession = Depends(get_db),
@@ -251,6 +281,7 @@ class RegelDaten(BaseModel):
     part_id: str = Field(min_length=1, max_length=64)
     part_name: str | None = None
     archive_id: int | None = None
+    library_file_id: int | None = None
     plate_id: int | None = Field(None, ge=1)
     dateiname: str = ""
     stueck_je_druck: int = Field(1, ge=1, le=10000)
@@ -274,6 +305,7 @@ def _regel_antwort(r: LagerDruckRegel) -> dict:
         "part_id": r.part_id,
         "part_name": r.part_name,
         "archive_id": r.archive_id,
+        "library_file_id": r.library_file_id,
         "plate_id": r.plate_id,
         "dateiname": r.dateiname,
         "stueck_je_druck": r.stueck_je_druck,
@@ -286,21 +318,34 @@ def _regel_antwort(r: LagerDruckRegel) -> dict:
 
 
 async def _regel_uebernehmen(db: AsyncSession, regel: LagerDruckRegel, daten: RegelDaten) -> None:
+    if daten.archive_id and daten.library_file_id:
+        raise HTTPException(400, "Bitte nur eine Druckdatei waehlen: Archiv oder Dateimanager.")
     archiv = await db.get(PrintArchive, daten.archive_id) if daten.archive_id else None
     if daten.archive_id and archiv is None:
         raise HTTPException(404, "Druckdatei (Archiv) nicht gefunden")
+    datei = await db.get(LibraryFile, daten.library_file_id) if daten.library_file_id else None
+    if daten.library_file_id and (datei is None or datei.deleted_at is not None):
+        raise HTTPException(404, "Druckdatei (Dateimanager) nicht gefunden")
+    if datei is not None and not bibliothek_druckbar(datei):
+        raise HTTPException(400, "Die Datei ist nicht gesliced - bitte eine .gcode.3mf-Datei waehlen.")
+    gesliced_fuer = (
+        archiv.sliced_for_model if archiv else ((datei.file_metadata or {}).get("sliced_for_model") if datei else None)
+    )
     if daten.printer_id and await db.get(Printer, daten.printer_id) is None:
         raise HTTPException(404, "Drucker nicht gefunden")
     target_model = None if daten.printer_id else normalize_model_name(daten.target_model)
-    if archiv is not None and not daten.printer_id and not target_model and not archiv.sliced_for_model:
+    if (archiv or datei) is not None and not daten.printer_id and not target_model and not gesliced_fuer:
         raise HTTPException(400, "Bitte einen Drucker oder ein Druckermodell waehlen.")
-    dateiname = daten.dateiname.strip() or (dateiname_aus_archiv(archiv) if archiv else "")
+    dateiname = daten.dateiname.strip() or (
+        dateiname_aus_archiv(archiv) if archiv else dateiname_aus_bibliothek(datei) if datei else ""
+    )
     if not dateiname:
         raise HTTPException(400, "Bitte eine Druckdatei waehlen oder einen Dateinamen angeben.")
 
     regel.part_id = daten.part_id
     regel.part_name = daten.part_name
     regel.archive_id = daten.archive_id
+    regel.library_file_id = daten.library_file_id
     regel.plate_id = daten.plate_id
     regel.dateiname = dateiname
     regel.stueck_je_druck = daten.stueck_je_druck

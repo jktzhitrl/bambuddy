@@ -1289,3 +1289,68 @@ def test_packliste_mit_fuss_variante():
 
     # Zu wenig +20-Fuesse: nicht packbar.
     assert packliste.packbare_auftraege(_fuss_daten(set_bestand=1)) == []
+
+
+async def _bibliotheksdatei(sessions, **meta):
+    from backend.app.models.library import LibraryFile
+
+    async with sessions() as db:
+        datei = LibraryFile(
+            filename="Arme.gcode.3mf",
+            file_path="library/arme.gcode.3mf",
+            file_type="3mf",
+            file_size=1,
+            file_metadata={"sliced_for_model": "P1S", "print_time_seconds": 5400.0, **meta},
+        )
+        db.add(datei)
+        await db.commit()
+        return datei
+
+
+async def test_regel_mit_datei_aus_dem_dateimanager(umgebung):
+    """Datei nur hochgeladen, nie gedruckt: landet mit library_file_id in der Warteschlange."""
+    service, lager, drucker, archiv, sessions = umgebung
+    datei = await _bibliotheksdatei(sessions)
+    async with sessions() as db:
+        db.add(
+            LagerDruckRegel(
+                part_id="teil-1",
+                part_name="Halter",
+                library_file_id=datei.id,
+                dateiname="Arme",
+                stueck_je_druck=10,
+                modus=MODUS_AUTOMATISCH,
+            )
+        )
+        await db.commit()
+
+    assert (await service.durchlauf())["angelegt"] == 1
+    (item,) = await _alle(sessions, PrintQueueItem)
+    assert item.library_file_id == datei.id and item.archive_id is None
+    assert item.target_model == "P1S" and item.print_time_seconds == 5400
+
+    # Druckende: gebucht wird unter dem Namen der Regel.
+    await service.bei_druckende(drucker.id, {"status": "completed"}, item.id, None)
+    assert lager.buchungen[0]["dateiname"] == "Arme"
+
+
+async def test_geloeschte_datei_plant_nichts(umgebung):
+    from datetime import datetime
+
+    from backend.app.models.library import LibraryFile
+
+    service, lager, drucker, archiv, sessions = umgebung
+    datei = await _bibliotheksdatei(sessions)
+    async with sessions() as db:
+        (await db.get(LibraryFile, datei.id)).deleted_at = datetime(2026, 1, 1)
+        db.add(
+            LagerDruckRegel(
+                part_id="teil-1",
+                library_file_id=datei.id,
+                dateiname="Arme",
+                stueck_je_druck=10,
+                modus=MODUS_AUTOMATISCH,
+            )
+        )
+        await db.commit()
+    assert (await service.durchlauf())["angelegt"] == 0

@@ -372,6 +372,7 @@ const LEERE_REGEL: Regel = {
   part_id: '',
   part_name: null,
   archive_id: null,
+  library_file_id: null,
   plate_id: null,
   dateiname: '',
   stueck_je_druck: 1,
@@ -483,7 +484,13 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
   const [druckerArt, setDruckerArt] = useState<'fest' | 'modell'>(regel.printer_id ? 'fest' : 'modell');
 
   const teile = useQuery({ queryKey: ['lager-autodruck', 'teile'], queryFn: lagerAutodruckApi.teile, retry: false });
-  const archive = useQuery({ queryKey: ['lager-autodruck', 'archive', suche], queryFn: () => lagerAutodruckApi.archive(suche) });
+  // Druckdatei aus dem Dateimanager (nur hochgeladen) oder aus dem Archiv (schon gedruckt).
+  const [quelle, setQuelle] = useState<'datei' | 'archiv'>(regel.archive_id ? 'archiv' : 'datei');
+  const archive = useQuery({
+    queryKey: ['lager-autodruck', quelle, suche],
+    queryFn: () => (quelle === 'archiv' ? lagerAutodruckApi.archive(suche) : lagerAutodruckApi.dateien(suche)),
+  });
+  const gewaehlteId = quelle === 'archiv' ? r.archive_id : r.library_file_id;
   const drucker = useQuery({ queryKey: ['lager-autodruck', 'drucker'], queryFn: lagerAutodruckApi.drucker });
 
   const modelle = useMemo(
@@ -512,7 +519,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
     onError: (e: Error) => showToast(e.message, 'error'),
   });
 
-  const gewaehltesArchiv = archive.data?.find(a => a.id === r.archive_id);
+  const gewaehltesArchiv = archive.data?.find(a => a.id === gewaehlteId);
 
   return (
     <Card>
@@ -539,24 +546,46 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
           </select>
         </Feld>
 
-        <Feld titel="Druckdatei aus dem Bambuddy-Archiv" hilfe="Diese Datei wird für das Teil gedruckt.">
+        <Feld
+          titel="Druckdatei"
+          hilfe={quelle === 'datei'
+            ? 'Geslicte Dateien (.gcode.3mf) aus dem Dateimanager – müssen noch nie gedruckt worden sein.'
+            : 'Dateien, die schon einmal gedruckt wurden.'}
+        >
+          <div className="flex gap-2">
+            {([['datei', 'Aus dem Dateimanager'], ['archiv', 'Aus dem Archiv']] as const).map(([wert, titel]) => (
+              <button
+                key={wert}
+                type="button"
+                className={`px-3 py-1.5 rounded-lg text-sm border ${quelle === wert ? 'border-bambu-green text-white bg-bambu-green/10' : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white'}`}
+                onClick={() => {
+                  setQuelle(wert);
+                  setSuche('');
+                  setR(alt => ({ ...alt, archive_id: null, library_file_id: null }));
+                }}
+              >
+                {titel}
+              </button>
+            ))}
+          </div>
           <input className={EINGABE} placeholder="Suchen …" value={suche} onChange={e => setSuche(e.target.value)} />
           <select
             className={EINGABE}
-            value={r.archive_id ?? ''}
+            value={gewaehlteId ?? ''}
             onChange={e => {
               const id = e.target.value ? Number(e.target.value) : null;
               const a = archive.data?.find(x => x.id === id);
               setR(alt => ({
                 ...alt,
-                archive_id: id,
+                archive_id: quelle === 'archiv' ? id : null,
+                library_file_id: quelle === 'datei' ? id : null,
                 dateiname: !alt.dateiname && a ? a.name : alt.dateiname,
                 target_model: alt.target_model ?? a?.modell ?? null,
               }));
             }}
           >
-            <option value="">– Datei wählen –</option>
-            {r.archive_id && !gewaehltesArchiv && <option value={r.archive_id}>Archiv #{r.archive_id}</option>}
+            <option value="">{archive.data && archive.data.length === 0 && !suche ? (quelle === 'datei' ? '– keine geslicte Datei im Dateimanager –' : '– Archiv ist leer –') : '– Datei wählen –'}</option>
+            {gewaehlteId && !gewaehltesArchiv && <option value={gewaehlteId}>{quelle === 'archiv' ? 'Archiv' : 'Datei'} #{gewaehlteId}</option>}
             {archive.data?.map(a => (
               <option key={a.id} value={a.id}>
                 {a.name}{a.modell ? ` · ${a.modell}` : ''}{a.gramm ? ` · ${Math.round(a.gramm)} g` : ''}
@@ -633,7 +662,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
 
         <div className="flex gap-2 justify-end">
           <Button variant="secondary" onClick={onFertig}>Abbrechen</Button>
-          <Button onClick={() => speichern.mutate()} disabled={speichern.isPending || !r.part_id || !r.archive_id}>
+          <Button onClick={() => speichern.mutate()} disabled={speichern.isPending || !r.part_id || !(r.archive_id || r.library_file_id)}>
             {speichern.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             Speichern
           </Button>

@@ -48,6 +48,7 @@ from backend.app.models.lager_autodruck import (
     LagerDruckJob,
     LagerDruckRegel,
 )
+from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe, packliste, telegram
@@ -96,6 +97,30 @@ def dateiname_aus_druck(subtask_name: str | None, filename: str | None) -> str:
 
 def dateiname_aus_archiv(archiv: PrintArchive) -> str:
     return (archiv.print_name or "").strip() or dateiname_aus_druck(None, archiv.filename)
+
+
+def dateiname_aus_bibliothek(datei: LibraryFile) -> str:
+    meta = datei.file_metadata or {}
+    return str(meta.get("print_name") or "").strip() or dateiname_aus_druck(None, datei.filename)
+
+
+def bibliothek_druckbar(datei: LibraryFile) -> bool:
+    """Nur geslicte Dateien lassen sich an den Drucker schicken."""
+    name = (datei.filename or "").lower()
+    meta = datei.file_metadata or {}
+    return name.endswith((".gcode.3mf", ".gcode")) or bool(meta.get("print_time_seconds"))
+
+
+def bibliothek_druckzeit(datei: LibraryFile) -> int | None:
+    try:
+        wert = int(float((datei.file_metadata or {}).get("print_time_seconds") or 0))
+    except (TypeError, ValueError):
+        return None
+    return wert or None
+
+
+def hat_druckdatei(regel) -> bool:
+    return regel.archive_id is not None or getattr(regel, "library_file_id", None) is not None
 
 
 class LagerAutodruckService:
@@ -303,7 +328,7 @@ class LagerAutodruckService:
             regel = regel_je_id[eintrag.regel_id]
             if regel.modus == MODUS_AUS:
                 eintrag.hinweis = "Regel pausiert"
-            elif regel.archive_id is None:
+            elif not hat_druckdatei(regel):
                 eintrag.hinweis = "Keine Druckdatei gewaehlt"
             elif regel.id in gesperrt:
                 eintrag.hinweis = gesperrt[regel.id]
@@ -314,7 +339,7 @@ class LagerAutodruckService:
             c
             for c in kandidaten
             if regel_je_id[c.regel_id].modus != MODUS_AUS
-            and regel_je_id[c.regel_id].archive_id is not None
+            and hat_druckdatei(regel_je_id[c.regel_id])
             and c.regel_id not in gesperrt
         ]
         self.uebersicht = [e.__dict__ for e in uebersicht]
@@ -371,13 +396,19 @@ class LagerAutodruckService:
         vorne: dict[int | None, int] = defaultdict(int)
         for c, dringlichkeit, begruendung in bewertet:
             regel = regel_je_id[c.regel_id]
-            archiv = await db.get(PrintArchive, regel.archive_id)
-            if archiv is None:
+            archiv = await db.get(PrintArchive, regel.archive_id) if regel.archive_id else None
+            datei = await db.get(LibraryFile, regel.library_file_id) if regel.library_file_id else None
+            if datei is not None and datei.deleted_at is not None:
+                datei = None
+            if archiv is None and datei is None:
                 continue
             ohne_freigabe = regel.modus == MODUS_AUTOMATISCH or (regel.modus == MODUS_KI and dringlichkeit == "niedrig")
             target_model = normalize_model_name(regel.target_model)
             if regel.printer_id is None and not target_model:
-                target_model = normalize_model_name(archiv.sliced_for_model)
+                gesliced_fuer = (
+                    archiv.sliced_for_model if archiv else (datei.file_metadata or {}).get("sliced_for_model")
+                )
+                target_model = normalize_model_name(gesliced_fuer)
                 if not target_model:
                     logger.warning("Lager-Autodruck: Regel %s hat weder Drucker noch Druckermodell", regel.id)
                     continue
@@ -390,6 +421,7 @@ class LagerAutodruckService:
                     db,
                     regel=regel,
                     archiv=archiv,
+                    datei=datei,
                     target_model=None if regel.printer_id else target_model,
                     manueller_start=not ohne_freigabe,
                     vorne_an=vorne[regel.printer_id] if vorziehen else None,
@@ -428,10 +460,11 @@ class LagerAutodruckService:
         db: AsyncSession,
         *,
         regel: LagerDruckRegel,
-        archiv: PrintArchive,
+        archiv: PrintArchive | None,
         target_model: str | None,
         manueller_start: bool,
         vorne_an: int | None = None,
+        datei: LibraryFile | None = None,
     ) -> PrintQueueItem:
         # Gleiche Positionslogik wie beim Anlegen ueber die Warteschlange:
         # je Drucker, bzw. gemeinsam fuer alle nicht zugewiesenen Eintraege.
@@ -455,12 +488,14 @@ class LagerAutodruckService:
             printer_id=regel.printer_id,
             target_model=target_model,
             target_location=regel.target_location if target_model else None,
-            archive_id=archiv.id,
+            # Aus dem Dateimanager: das Archiv legt Bambuddy beim Druckstart an.
+            archive_id=archiv.id if archiv else None,
+            library_file_id=None if archiv else datei.id,
             plate_id=regel.plate_id,
             position=position,
             manual_start=manueller_start,
             status="pending",
-            print_time_seconds=archiv.print_time_seconds,
+            print_time_seconds=archiv.print_time_seconds if archiv else bibliothek_druckzeit(datei),
         )
         db.add(item)
         await db.flush()

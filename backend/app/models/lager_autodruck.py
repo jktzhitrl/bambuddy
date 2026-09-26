@@ -52,7 +52,12 @@ class LagerDruckRegel(Base):
     # Name nur zur Anzeige zwischengespeichert, massgeblich bleibt das Lager.
     part_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Druckdatei: entweder aus dem Archiv (schon einmal gedruckt) oder aus
+    # dem Dateimanager (nur hochgeladen, gesliced) - genau eins von beiden.
     archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="SET NULL"), nullable=True)
+    library_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("library_files.id", ondelete="SET NULL"), nullable=True
+    )
     plate_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Unter diesem Namen landet der Druck im Lager (druck_zuordnung.dateiname).
     dateiname: Mapped[str] = mapped_column(String(255))

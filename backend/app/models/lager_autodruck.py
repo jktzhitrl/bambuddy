@@ -35,6 +35,9 @@ JOB_FERTIG = "fertig"
 JOB_FEHLDRUCK = "fehldruck"
 JOB_ABGEBROCHEN = "abgebrochen"
 JOB_VERWORFEN = "verworfen"
+# Druck kam nie in Gang (z.B. Upload zum Drucker abgelehnt): kein Material
+# verbraucht, nichts zu buchen.
+JOB_STARTFEHLER = "startfehler"
 JOB_OFFEN = (JOB_WARTET, JOB_GEPLANT, JOB_DRUCKT)
 
 # Zustand einer Buchung Richtung Lager.

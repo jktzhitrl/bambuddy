@@ -1,6 +1,6 @@
 """Tests fuer das Fork-Modul Lager-Autodruck."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
@@ -13,8 +13,10 @@ from backend.app.models.lager_autodruck import (
     BUCHUNG_FEHLER,
     BUCHUNG_GESENDET,
     JOB_ABGEBROCHEN,
+    JOB_FEHLDRUCK,
     JOB_FERTIG,
     JOB_GEPLANT,
+    JOB_STARTFEHLER,
     JOB_VERWORFEN,
     JOB_WARTET,
     MODUS_AUS,
@@ -26,7 +28,7 @@ from backend.app.models.lager_autodruck import (
     LagerDruckRegel,
 )
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.lager_autodruck import bedarf, konfig, nachtruhe
+from backend.app.services.lager_autodruck import bedarf, konfig, nachtruhe, service as service_modul
 from backend.app.services.lager_autodruck.service import (
     LagerAutodruckService,
     dateiname_aus_druck,
@@ -513,6 +515,70 @@ async def test_nicht_zugeordnete_buchung_haelt_regel_an(umgebung):
         await db.commit()
     await service.durchlauf()
     assert len(await _alle(sessions, LagerDruckJob)) == 2
+
+
+async def _start_scheitert(sessions):
+    async with sessions() as db:
+        for item in (await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "pending"))).scalars():
+            item.status = "failed"
+            item.error_message = "The printer rejected the upload path (550)."
+            item.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+
+
+async def test_startfehler_bucht_nichts_und_pausiert_die_regel(umgebung, monkeypatch):
+    service, lager, drucker, archiv, sessions = umgebung
+    regel_id = await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+    await service.durchlauf()
+    await _start_scheitert(sessions)
+
+    # Nicht gestartet: kein Fehldruck, keine Buchung, kein sofortiger Neuversuch.
+    await service.durchlauf()
+    (job,) = await _alle(sessions, LagerDruckJob)
+    assert job.status == JOB_STARTFEHLER
+    assert lager.buchungen == []
+    assert "startete nicht" in service.uebersicht[0]["hinweis"]
+    assert "550" in service.uebersicht[0]["hinweis"]
+    await service.durchlauf()
+    assert len(await _alle(sessions, LagerDruckJob)) == 1
+
+    # Regel neu speichern -> sofort neuer Versuch.
+    async with sessions() as db:
+        (await db.get(LagerDruckRegel, regel_id)).updated_at = datetime(2100, 1, 1)
+        await db.commit()
+    await service.durchlauf()
+    assert len(await _alle(sessions, LagerDruckJob)) == 2
+
+
+async def test_nach_startfehler_pause_neuer_versuch(umgebung, monkeypatch):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+    await service.durchlauf()
+    await _start_scheitert(sessions)
+    await service.durchlauf()
+    assert len(await _alle(sessions, LagerDruckJob)) == 1
+
+    monkeypatch.setattr(service_modul, "STARTFEHLER_PAUSE", timedelta(0))
+    await service.durchlauf()
+    jobs = await _alle(sessions, LagerDruckJob)
+    assert [j.status for j in jobs] == [JOB_STARTFEHLER, JOB_GEPLANT]
+
+
+async def test_fehldruck_nach_start_wird_weiter_gebucht(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+    await service.durchlauf()
+    (item,) = await _alle(sessions, PrintQueueItem)
+    async with sessions() as db:
+        eintrag = await db.get(PrintQueueItem, item.id)
+        eintrag.status = "failed"
+        eintrag.started_at = datetime(2026, 9, 23, 9, 0)
+        eintrag.completed_at = datetime(2026, 9, 23, 10, 0)
+        await db.commit()
+    await service.durchlauf()
+    job = (await _alle(sessions, LagerDruckJob))[0]
+    assert job.status == JOB_FEHLDRUCK
+    assert len(lager.buchungen) == 1
 
 
 async def test_geloeschter_warteschlangeneintrag_gibt_bedarf_frei(umgebung):

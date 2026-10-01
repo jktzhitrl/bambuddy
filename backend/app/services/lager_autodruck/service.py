@@ -39,6 +39,7 @@ from backend.app.models.lager_autodruck import (
     JOB_FERTIG,
     JOB_GEPLANT,
     JOB_OFFEN,
+    JOB_STARTFEHLER,
     JOB_VERWORFEN,
     JOB_WARTET,
     MODUS_AUS,
@@ -68,6 +69,13 @@ BUCHUNG_OK = ("gebucht", "schon_gebucht")
 BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert")
 # Nach so vielen Fehlschlaegen in Folge gibt es eine Benachrichtigung.
 MELDEN_NACH_VERSUCHEN = 3
+# Wie lange eine Regel nach einem Startfehler wartet, bevor sie es neu versucht.
+STARTFEHLER_PAUSE = timedelta(minutes=30)
+
+
+def _uhrzeit(utc_naiv: datetime) -> str:
+    """Naiver UTC-Zeitpunkt als Ortszeit "HH:MM" fuer Meldungen."""
+    return utc_naiv.replace(tzinfo=timezone.utc).astimezone(local_zone()).strftime("%H:%M")
 
 
 # Mehr neue packbare Bestellungen auf einmal -> eine Sammelnachricht.
@@ -297,6 +305,36 @@ class LagerAutodruckService:
                 gesperrt[r.id] = (
                     f"Angehalten: letzter Druck kam im Lager als '{letzte}' an. "
                     f"Zuordnung '{r.dateiname}' im Lager pruefen, dann Regel neu speichern."
+                )
+
+        # Startet ein Druck nicht (z.B. Drucker lehnt den Upload ab), wuerde
+        # sonst jeder Durchlauf sofort einen neuen anlegen, der genauso
+        # scheitert. Darum nach einem Startfehler eine Weile Pause fuer die
+        # Regel - danach ein neuer Versuch, oder sofort nach neuem Speichern.
+        jetzt_naiv = utcnow_naive()
+        for r in regeln:
+            if r.id in gesperrt:
+                continue
+            letzter = (
+                await db.execute(
+                    select(LagerDruckJob)
+                    .where(LagerDruckJob.regel_id == r.id, LagerDruckJob.status.notin_(JOB_OFFEN))
+                    .order_by(LagerDruckJob.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if letzter is None or letzter.status != JOB_STARTFEHLER or letzter.finished_at is None:
+                continue
+            if r.updated_at and letzter.finished_at < r.updated_at:
+                continue
+            weiter_ab = letzter.finished_at + STARTFEHLER_PAUSE
+            if jetzt_naiv < weiter_ab:
+                item = await db.get(PrintQueueItem, letzter.queue_item_id) if letzter.queue_item_id else None
+                grund = (item.error_message if item and item.error_message else "Druck ist nicht gestartet").strip()
+                gesperrt[r.id] = (
+                    f"Pausiert: der letzte Druck startete nicht ({grund}). "
+                    f"Neuer Versuch ab {_uhrzeit(weiter_ab)} Uhr "
+                    "oder sofort nach neuem Speichern der Regel."
                 )
 
         tagesbeginn = local_day_start(datetime.now(timezone.utc)).replace(tzinfo=None)
@@ -560,6 +598,11 @@ class LagerAutodruckService:
                     if job.status == JOB_WARTET:
                         job.freigegeben_von = job.freigegeben_von or "Bambuddy-Warteschlange"
                     job.status = JOB_GEPLANT
+            elif item.status == "failed" and item.started_at is None and job.status != JOB_DRUCKT:
+                # Druck ist nie gestartet (z.B. Upload abgelehnt): kein
+                # Fehldruck, nichts verbraucht, also auch nichts buchen.
+                job.status = JOB_STARTFEHLER
+                job.finished_at = job.finished_at or item.completed_at or utcnow_naive()
             elif item.status in ("completed", "failed"):
                 # Druckende verpasst (z.B. Neustart): Status und Buchung nachholen.
                 await self._job_abschliessen(

@@ -32,6 +32,7 @@ const JOB_TEXT: Record<string, { text: string; farbe: string }> = {
   fertig: { text: 'Fertig', farbe: 'text-bambu-green' },
   fehldruck: { text: 'Fehldruck', farbe: 'text-red-400' },
   abgebrochen: { text: 'Abgebrochen', farbe: 'text-bambu-gray' },
+  startfehler: { text: 'Start fehlgeschlagen', farbe: 'text-amber-400' },
   verworfen: { text: 'Verworfen', farbe: 'text-bambu-gray' },
 };
 

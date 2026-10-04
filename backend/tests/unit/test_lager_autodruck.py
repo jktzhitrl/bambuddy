@@ -260,9 +260,13 @@ class FakeLager:
         self.buchungen = []
         self.fehler = False
         self.antwort = "gebucht"
+        self.in_pruefung = []
 
     async def lade_bestandsdaten(self):
-        return _daten(self.teile, auftraege=self.auftraege, positionen=self.positionen)
+        return {
+            **_daten(self.teile, auftraege=self.auftraege, positionen=self.positionen),
+            "in_pruefung": self.in_pruefung,
+        }
 
     async def lade_packdaten(self):
         return {"teile": self.teile, "auftraege": self.auftraege, "positionen": self.positionen, **self.packdaten}
@@ -579,6 +583,22 @@ async def test_fehldruck_nach_start_wird_weiter_gebucht(umgebung):
     job = (await _alle(sessions, LagerDruckJob))[0]
     assert job.status == JOB_FEHLDRUCK
     assert len(lager.buchungen) == 1
+
+
+async def test_teile_in_qualitaetskontrolle_werden_nicht_nachgedruckt(umgebung):
+    service, lager, drucker, archiv, sessions = umgebung
+    await _regel_anlegen(sessions, archiv, drucker, stueck_je_druck=10)
+    lager.antwort = "zur_pruefung"
+    await service.durchlauf()
+    (item,) = await _alle(sessions, PrintQueueItem)
+    await service.bei_druckende(drucker.id, {"status": "completed"}, item.id, archiv.id)
+
+    # Bestand im Lager noch nicht gestiegen, aber 10 Stueck warten auf Pruefung.
+    lager.in_pruefung = [{"part_id": "teil-1", "menge": 10}]
+    await service.durchlauf()
+    assert len(await _alle(sessions, LagerDruckJob)) == 1
+    # "zur_pruefung" ist eine angenommene Buchung: keine Sperre der Regel.
+    assert "Angehalten" not in (service.uebersicht[0]["hinweis"] or "")
 
 
 async def test_geloeschter_warteschlangeneintrag_gibt_bedarf_frei(umgebung):

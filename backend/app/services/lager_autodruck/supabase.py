@@ -137,12 +137,22 @@ class LagerClient:
         positionen = await self.lesen("order_items", {"select": "order_id,part_id,menge"})
         # Gesperrte Lagerorte: diese Menge ist nicht verfuegbar.
         gesperrt = await self.lesen("part_lagerorte", {"select": "part_id,menge", "gesperrt": "is.true"})
+        # Fertige Drucke, die im Lager noch auf die Qualitaetskontrolle warten.
+        # Aeltere Lager-Datenbank ohne diesen Ablauf: dann eben keine.
+        try:
+            in_pruefung = await self.lesen(
+                "druck_ereignisse", {"select": "part_id,menge", "ergebnis": "eq.zur_pruefung"}
+            )
+        except LagerFehler as e:
+            logger.warning("Lager-Autodruck: Drucke in Pruefung nicht lesbar: %s", e)
+            in_pruefung = []
         return {
             "teile": teile,
             "komponenten": komponenten,
             "auftraege": auftraege,
             "positionen": positionen,
             "gesperrt": gesperrt,
+            "in_pruefung": in_pruefung,
         }
 
     async def lade_packdaten(self) -> dict[str, list[dict]]:

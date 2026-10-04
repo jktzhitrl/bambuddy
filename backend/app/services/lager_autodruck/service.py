@@ -63,10 +63,12 @@ logger = logging.getLogger(__name__)
 MAX_VERSUCHE = 20
 _RANG = {"hoch": 0, "mittel": 1, "niedrig": 2}
 # Antworten von druck_verbuchen, bei denen der Bestand im Lager wirklich stieg.
-BUCHUNG_OK = ("gebucht", "schon_gebucht")
+# "zur_pruefung": Lager hat den Druck angenommen, die Teile warten dort auf
+# die Qualitaetskontrolle (zaehlen hier ueber in_pruefung als vorhanden).
+BUCHUNG_OK = ("gebucht", "schon_gebucht", "zur_pruefung")
 # Antworten, bei denen im Lager nichts mehr zu tun ist ("ignoriert" = Drucker
 # ist im Lager bewusst ausgeschlossen).
-BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert")
+BUCHUNG_ANGEKOMMEN = ("gebucht", "gebucht_fehldruck", "schon_gebucht", "ignoriert", "zur_pruefung")
 # Nach so vielen Fehlschlaegen in Folge gibt es eine Benachrichtigung.
 MELDEN_NACH_VERSUCHEN = 3
 # Wie lange eine Regel nach einem Startfehler wartet, bevor sie es neu versucht.
@@ -359,6 +361,10 @@ class LagerAutodruckService:
             for r in regeln
         ]
         daten = await lager.lade_bestandsdaten()
+        # Gedruckt, aber im Lager noch in der Qualitaetskontrolle: nicht
+        # nochmal drucken.
+        for zeile in daten.get("in_pruefung") or []:
+            in_arbeit[zeile.get("part_id")] += bedarf.zahl(zeile.get("menge"))
         kandidaten, uebersicht = bedarf.berechne(daten, eingaben, in_arbeit)
 
         regel_je_id = {r.id: r for r in regeln}

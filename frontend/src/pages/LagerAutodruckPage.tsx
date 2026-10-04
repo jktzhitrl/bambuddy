@@ -675,7 +675,7 @@ function RegelFormular({ regel, onFertig }: { regel: Regel; onFertig: () => void
 
 // --- Buchungen -------------------------------------------------------------------
 
-const BUCHUNG_OK = ['gebucht', 'gebucht_fehldruck', 'schon_gebucht'];
+const BUCHUNG_OK = ['gebucht', 'gebucht_fehldruck', 'schon_gebucht', 'zur_pruefung'];
 
 function Buchungen({ darfAendern }: { darfAendern: boolean }) {
   const queryClient = useQueryClient();

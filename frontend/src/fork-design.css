@@ -1,0 +1,117 @@
+/* =================================================================
+   Fork: B&E-Design (wie die Lager-Software)
+   -----------------------------------------------------------------
+   Neutrale Grautöne, Orange als einzige Akzentfarbe, Schrift IBM Plex
+   Sans, etwas kleinere Ecken und eine immer dunkle Seitenleiste.
+
+   Alles Optische des Forks steht in DIESER Datei. Sie wird in main.tsx
+   nach index.css geladen und überschreibt nur CSS-Variablen und wenige
+   Klassen - die Dateien des Originals bleiben fast unverändert, damit
+   Bambuddy-Updates weiter ohne Konflikte übernommen werden können.
+   ================================================================= */
+
+/* IBM Plex Sans, selbst gehostet wie Inter (offline-fähig, keine
+   Anfrage an Google). Lizenz: SIL OFL, siehe public/fonts. */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+
+  /* Ecken wie in der Lager-Software: Karten 8 px, Knöpfe 6 px */
+  --radius-xl: 0.5rem;
+  --radius-lg: 0.375rem;
+  --radius-2xl: 0.75rem;
+}
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+
+/* ---------- Hintergrund "Neutral" = B&E-Grau ---------- */
+.bg-neutral {
+  --bg-primary: #f4f4f2;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ececea;
+  --text-primary: #1c1c1a;
+  --text-secondary: #4a4a45;
+  --text-muted: #5e5e58;
+  --text-tertiary: #8f8f88;
+  --border-color: #e2e2de;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.dark.bg-neutral {
+  --bg-primary: #161615;
+  --bg-secondary: #1f1f1d;
+  --bg-tertiary: #2e2e2b;
+  --text-primary: #ecece8;
+  --text-secondary: #b4b4ac;
+  --text-muted: #8c8c84;
+  --text-tertiary: #5c5c56;
+  --border-color: #2e2e2b;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- Akzent "Orange" = B&E-Orange ---------- */
+.accent-orange {
+  --accent: #c2410c;
+  --accent-light: #ea580c;
+  --accent-dark: #9a3412;
+}
+.dark.accent-orange {
+  --accent: #e2560c;
+  --accent-light: #fb923c;
+  --accent-dark: #c2410c;
+}
+
+/* ---------- Seitenleiste immer anthrazit ----------
+   Die Tailwind-Farben (bg-bambu-dark-secondary, text-bambu-gray-light,
+   ...) lesen die --color-*-Variablen am Element selbst, deshalb werden
+   sie hier für die Seitenleiste überschrieben. */
+.nav-dunkel {
+  color-scheme: dark;
+  --bg-primary: #161615;
+  --bg-secondary: #1f1f1d;
+  --bg-tertiary: #34342f;
+  --text-primary: #ffffff;
+  --text-secondary: #cfcfc8;
+  --text-muted: #a3a39b;
+  --text-tertiary: #85857d;
+  --border-color: #34342f;
+  --color-bambu-dark: #161615;
+  --color-bambu-dark-secondary: #1f1f1d;
+  --color-bambu-dark-tertiary: #34342f;
+  --color-bambu-gray: #a3a39b;
+  --color-bambu-gray-light: #cfcfc8;
+  --color-bambu-gray-dark: #85857d;
+  border-right-color: #1f1f1d;
+}
+.nav-dunkel .text-white { color: #ffffff; }
+
+/* Aktiver Eintrag: dezent hervorgehoben statt voll orange, das Symbol
+   trägt die Akzentfarbe. */
+.nav-dunkel nav a.bg-bambu-green {
+  background-color: #34342f;
+  color: #ffffff;
+  font-weight: 600;
+}
+.nav-dunkel nav a.bg-bambu-green svg { color: #fb923c; }
+
+/* Das Logo ist dunkel gezeichnet - auf der dunklen Leiste bekommt es
+   ein weißes Feld wie in der Lager-Software. */
+.nav-dunkel img[src*="druckuebersicht_logo"] {
+  background-color: #ffffff;
+  padding: 2px;
+}

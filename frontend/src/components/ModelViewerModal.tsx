@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { X, ExternalLink, Box, Cog, Loader2, Layers, Check, Maximize2, Minimize2, ChevronDown } from 'lucide-react';
+import { ExternalLink, Box, Cog, Loader2, Layers, Check, ChevronDown } from 'lucide-react';
 import { ModelViewer } from './ModelViewer';
 import { Button } from './Button';
-import { api, withStreamToken } from '../api/client';
+import { PreviewModalShell } from './PreviewModalShell';
+import { usePreviewFullscreen } from '../hooks/usePreviewFullscreen';
+import { api, withMediaToken } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { isApiSliceableFileType, isSliceableFileType, openInSlicer, resolveDesktopSlicer, type SlicerType } from '../utils/slicer';
 import type { ArchivePlatesResponse, LibraryFilePlatesResponse, PlateMetadata } from '../types/plates';
@@ -23,6 +25,9 @@ interface ModelViewerModalProps {
   // externally — so the preview modal's slice action matches the file row's
   // Cog (in-app Bambuddy SliceModal) when the slicer API is enabled.
   onSliceWithBambuddy?: () => void;
+  // Forwarded to ModelViewer: one 256px PNG of the first render, used by the
+  // file manager to persist a STEP thumbnail (#2976).
+  onSnapshot?: (blob: Blob) => void;
 }
 
 interface Capabilities {
@@ -44,6 +49,11 @@ interface SlicerSplitButtonProps {
 // opens a dropdown with the other slicer options. Outside click or Escape
 // (non-propagating) closes the dropdown. The split only renders when the
 // action is already possible, so there is no disabled state to express.
+//
+// With nothing to put in the dropdown it collapses to a plain button rather
+// than offering a chevron onto an empty menu. That is reachable since #3029:
+// an STL has exactly one slicer that will take it, so there is no alternative
+// to offer once that one is the primary action.
 function SlicerSplitButton({ icon, label, dropdownLabel, onPrimary, items }: SlicerSplitButtonProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +78,15 @@ function SlicerSplitButton({ icon, label, dropdownLabel, onPrimary, items }: Sli
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [open]);
+
+  if (items.length === 0) {
+    return (
+      <Button variant="secondary" size="sm" onClick={onPrimary}>
+        {icon}
+        {label}
+      </Button>
+    );
+  }
 
   return (
     <div className="relative inline-flex" ref={containerRef}>
@@ -122,7 +141,7 @@ function SlicerSplitButton({ icon, label, dropdownLabel, onPrimary, items }: Sli
   );
 }
 
-export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, onClose, onSliceWithBambuddy }: ModelViewerModalProps) {
+export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, onClose, onSliceWithBambuddy, onSnapshot }: ModelViewerModalProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
@@ -139,25 +158,19 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
   const [platesLoading, setPlatesLoading] = useState(false);
   const [selectedPlateId, setSelectedPlateId] = useState<number | null>(null);
   const [platePage, setPlatePage] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [platePanelHeight, setPlatePanelHeight] = useState<number | null>(null);
   const [isDraggingDivider, setIsDraggingDivider] = useState(false);
   const [hasCustomSplit, setHasCustomSplit] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const platesPanelRef = useRef<HTMLDivElement>(null);
+  // Real fullscreen where the browser offers it, the viewport-filling layout
+  // below otherwise (#2976).
+  const fullscreen = usePreviewFullscreen();
+  const { isFullscreen, toggleFullscreen } = fullscreen;
   const dividerHeight = 10;
   const minPlateHeight = 160;
   const minViewerPx = 240;
   const minViewerRatio = 0.35;
-
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   useEffect(() => {
     setLoading(true);
@@ -171,7 +184,8 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
       // upload path tags it `3mf`, so we accept both shapes here for
       // the 3D-tab + g-code-tab gating (#1543).
       const isThreeMfFamily = normalizedType === '3mf' || normalizedType === 'gcode.3mf';
-      const hasModel = isThreeMfFamily || normalizedType === 'stl';
+      // STEP joins the 3D tab via the OpenCascade WASM loader in ModelViewer (#2976).
+      const hasModel = isThreeMfFamily || normalizedType === 'stl' || normalizedType === 'step' || normalizedType === 'stp';
       setCapabilities({
         has_model: hasModel,
         has_source: false,
@@ -367,12 +381,20 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
     };
   }, [isDraggingDivider, dividerHeight, minPlateHeight, minViewerPx, minViewerRatio]);
 
-  // Which file types can be handed to a desktop slicer via the URL protocol
-  // handler. Shares its list with `isSliceableFilename()`, which the File
+  // Which desktop slicers this file can actually be handed to, configured one
+  // first. Shares its lists with `isSliceableFilename()`, which the File
   // Manager's card menu and list row use, so a file's "Slice" action and its
   // 3D-preview slicer button can no longer disagree about the same file.
-  const slicerReadyType = isSliceableFileType(fileType);
-  const canOpenInSlicer = isLibrary ? slicerReadyType : true;
+  //
+  // Per-slicer rather than one list, because Bambu Studio's protocol handler
+  // takes 3MF only while OrcaSlicer's takes STL and STEP too (#3029). Archive
+  // previews always hand over a 3MF, which both accept.
+  const desktopSlicerOrder: SlicerType[] =
+    preferredSlicer === 'orcaslicer' ? ['orcaslicer', 'bambu_studio'] : ['bambu_studio', 'orcaslicer'];
+  const usableSlicers = isLibrary
+    ? desktopSlicerOrder.filter((slicer) => isSliceableFileType(fileType, slicer))
+    : desktopSlicerOrder;
+  const canOpenInSlicer = usableSlicers.length > 0;
   // The sidecar's list is narrower: its CLI cannot load STEP even though the
   // desktop GUI opens one fine, so in-app slicing is gated separately.
   const apiSlicerReadyType = isApiSliceableFileType(fileType);
@@ -415,9 +437,10 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
     }
   };
 
-  const slicerDropdownTypes: SlicerType[] = useBambuddySlicer
-    ? ['bambu_studio', 'orcaslicer']
-    : [preferredSlicer === 'orcaslicer' ? 'bambu_studio' : 'orcaslicer'];
+  // With the sidecar as the primary action every usable slicer is an
+  // alternative; without it the first one is the primary, so the dropdown holds
+  // the rest.
+  const slicerDropdownTypes: SlicerType[] = useBambuddySlicer ? usableSlicers : usableSlicers.slice(1);
   const slicerName = (slicer: SlicerType) =>
     slicer === 'orcaslicer' ? t('settings.slicerOrcaSlicer') : t('settings.slicerBambuStudio');
   const slicerDropdownItems = slicerDropdownTypes.map((slicer) => ({
@@ -427,329 +450,324 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
   }));
 
   return (
-    <div
-      className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${isFullscreen ? 'p-0' : 'p-8'}`}
-      onClick={onClose}
+    <PreviewModalShell
+      title={title}
+      fullscreen={fullscreen}
+      onClose={onClose}
+      closeOnBackdropClick
+      titleExtra={
+        hasObjectCount ? (
+          <span className="text-xs text-bambu-gray bg-bambu-dark-tertiary/70 px-2 py-1 rounded whitespace-nowrap">
+            {objectCountLabel}: {t('modelViewer.objectCount', { count: selectedObjectCount })}
+          </span>
+        ) : undefined
+      }
+      actions={
+        <>
+          {useBambuddySlicer ? (
+            <SlicerSplitButton
+              icon={<Cog className="w-4 h-4" />}
+              label={t('slice.action')}
+              dropdownLabel={t('modelViewer.moreSlicerOptions')}
+              onPrimary={() => onSliceWithBambuddy?.()}
+              items={slicerDropdownItems}
+            />
+          ) : canOpenInSlicer ? (
+            <SlicerSplitButton
+              icon={<ExternalLink className="w-4 h-4" />}
+              // Name the slicer when it is not the configured one. That happens
+              // when the configured slicer cannot take this format — an STL with
+              // Bambu Studio selected — and silently handing the file to the
+              // other one without saying so would be worse than the failure it
+              // replaces.
+              label={
+                usableSlicers[0] === preferredSlicer
+                  ? t('modelViewer.openInSlicer')
+                  : t('modelViewer.openInSlicerWith', { slicer: slicerName(usableSlicers[0]) })
+              }
+              dropdownLabel={t('modelViewer.moreSlicerOptions')}
+              onPrimary={() => handleOpenInSlicer(usableSlicers[0])}
+              items={slicerDropdownItems}
+            />
+          ) : (
+            <Button variant="secondary" size="sm" disabled>
+              <ExternalLink className="w-4 h-4" />
+              {t('modelViewer.openInSlicer')}
+            </Button>
+          )}
+        </>
+      }
     >
-      <div
-        className={`bg-bambu-dark-secondary border border-bambu-dark-tertiary w-full flex flex-col ${
-          isFullscreen ? 'h-full max-w-none rounded-none' : 'h-[80vh] max-w-4xl rounded-xl'
-        }`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-bambu-dark-tertiary">
-          <div className="flex items-center gap-3 min-w-0 flex-1 mr-4">
-            <h2 className="text-lg font-semibold text-white truncate">{title}</h2>
-            {hasObjectCount && (
-              <span className="text-xs text-bambu-gray bg-bambu-dark-tertiary/70 px-2 py-1 rounded whitespace-nowrap">
-                {objectCountLabel}: {t('modelViewer.objectCount', { count: selectedObjectCount })}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {useBambuddySlicer ? (
-              <SlicerSplitButton
-                icon={<Cog className="w-4 h-4" />}
-                label={t('slice.action')}
-                dropdownLabel={t('modelViewer.moreSlicerOptions')}
-                onPrimary={() => onSliceWithBambuddy?.()}
-                items={slicerDropdownItems}
-              />
-            ) : canOpenInSlicer ? (
-              <SlicerSplitButton
-                icon={<ExternalLink className="w-4 h-4" />}
-                label={t('modelViewer.openInSlicer')}
-                dropdownLabel={t('modelViewer.moreSlicerOptions')}
-                onPrimary={() => handleOpenInSlicer(preferredSlicer)}
-                items={slicerDropdownItems}
-              />
-            ) : (
-              <Button variant="secondary" size="sm" disabled>
-                <ExternalLink className="w-4 h-4" />
-                {t('modelViewer.openInSlicer')}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsFullscreen((prev) => !prev)}
-              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-            >
-              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="w-5 h-5" />
-            </Button>
-          </div>
+      {/* Tabs - only show if we have capabilities */}
+      {capabilities && (
+        <div className="flex border-b border-bambu-dark-tertiary">
+          <button
+            onClick={() => capabilities.has_model && setActiveTab('3d')}
+            disabled={!capabilities.has_model}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors ${
+              activeTab === '3d'
+                ? 'text-bambu-green border-b-2 border-bambu-green'
+                : capabilities.has_model
+                  ? 'text-bambu-gray hover:text-white'
+                  : 'text-bambu-gray/30 cursor-not-allowed'
+            }`}
+          >
+            <Box className="w-4 h-4" />
+            {t('modelViewer.tabs.model')}
+            {!capabilities.has_model && <span className="text-xs">({t('modelViewer.notAvailable')})</span>}
+          </button>
         </div>
+      )}
 
-        {/* Tabs - only show if we have capabilities */}
-        {capabilities && (
-          <div className="flex border-b border-bambu-dark-tertiary">
-            <button
-              onClick={() => capabilities.has_model && setActiveTab('3d')}
-              disabled={!capabilities.has_model}
-              className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === '3d'
-                  ? 'text-bambu-green border-b-2 border-bambu-green'
-                  : capabilities.has_model
-                    ? 'text-bambu-gray hover:text-white'
-                    : 'text-bambu-gray/30 cursor-not-allowed'
-              }`}
-            >
-              <Box className="w-4 h-4" />
-              {t('modelViewer.tabs.model')}
-              {!capabilities.has_model && <span className="text-xs">({t('modelViewer.notAvailable')})</span>}
-            </button>
+      {/* Viewer */}
+      <div className="flex-1 overflow-hidden p-4">
+        {loading ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
           </div>
-        )}
-
-        {/* Viewer */}
-        <div className="flex-1 overflow-hidden p-4">
-          {loading ? (
-            <div className="w-full h-full flex items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
-            </div>
-          ) : activeTab === '3d' && capabilities ? (
-            <div
-              ref={splitContainerRef}
-              className={`w-full h-full flex flex-col ${splitFullscreen ? 'gap-0 min-h-0' : 'gap-3'}`}
-            >
-              {hasMultiplePlates && (
-                <div
-                  ref={platesPanelRef}
-                  style={splitFullscreen && platePanelHeight != null ? { height: platePanelHeight } : undefined}
-                  className={`rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 ${splitFullscreen ? 'flex flex-col shrink-0' : ''}`}
-                >
-                  <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
-                    <Layers className="w-4 h-4" />
-                    {t('modelViewer.plates')}
-                    {platesLoading && <Loader2 className="w-3 h-3 animate-spin" />}
-                  </div>
-                  <div className={splitFullscreen ? 'flex flex-col min-h-0 flex-1' : undefined}>
-                      <div
-                        ref={platesViewportRef}
-                        className={splitFullscreen ? 'min-h-0 overflow-hidden pr-1 flex-1' : undefined}
+        ) : activeTab === '3d' && capabilities ? (
+          <div
+            ref={splitContainerRef}
+            className={`w-full h-full flex flex-col ${splitFullscreen ? 'gap-0 min-h-0' : 'gap-3'}`}
+          >
+            {hasMultiplePlates && (
+              <div
+                ref={platesPanelRef}
+                style={splitFullscreen && platePanelHeight != null ? { height: platePanelHeight } : undefined}
+                className={`rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 ${splitFullscreen ? 'flex flex-col shrink-0' : ''}`}
+              >
+                <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
+                  <Layers className="w-4 h-4" />
+                  {t('modelViewer.plates')}
+                  {platesLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                </div>
+                <div className={splitFullscreen ? 'flex flex-col min-h-0 flex-1' : undefined}>
+                    <div
+                      ref={platesViewportRef}
+                      className={splitFullscreen ? 'min-h-0 overflow-hidden pr-1 flex-1' : undefined}
+                    >
+                    <div
+                      ref={platesGridRef}
+                      className={splitFullscreen ? 'grid gap-2' : 'grid grid-cols-2 md:grid-cols-3 gap-2'}
+                      style={splitFullscreen ? { gridTemplateColumns: `repeat(${plateColumns}, minmax(0, 1fr))` } : undefined}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPlateId(null)}
+                        className={`flex items-center rounded-lg border text-left transition-colors ${
+                          splitFullscreen ? 'gap-1.5 p-1.5 w-full' : 'gap-2 p-2'
+                        } ${
+                          selectedPlateId == null
+                            ? 'border-bambu-green bg-bambu-green/10'
+                            : 'border-bambu-dark-tertiary bg-bambu-dark-secondary hover:border-bambu-gray'
+                        }`}
                       >
-                      <div
-                        ref={platesGridRef}
-                        className={splitFullscreen ? 'grid gap-2' : 'grid grid-cols-2 md:grid-cols-3 gap-2'}
-                        style={splitFullscreen ? { gridTemplateColumns: `repeat(${plateColumns}, minmax(0, 1fr))` } : undefined}
-                      >
+                        <div className={`rounded bg-bambu-dark-tertiary flex items-center justify-center ${
+                          splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'
+                        }`}>
+                          <Layers className={`${splitFullscreen ? 'w-4 h-4' : 'w-5 h-5'} text-bambu-gray`} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`${splitFullscreen ? 'text-xs' : 'text-sm'} text-white font-medium truncate`}>{t('modelViewer.allPlates')}</p>
+                          <p className={`${splitFullscreen ? 'text-[10px]' : 'text-xs'} text-bambu-gray truncate`}>
+                            {t('modelViewer.plateCount', { count: plates.length })}
+                          </p>
+                        </div>
+                        {selectedPlateId == null && (
+                          <Check className={`${splitFullscreen ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-bambu-green flex-shrink-0`} />
+                        )}
+                      </button>
+                      {pagedPlates.map((plate) => (
                         <button
+                          key={plate.index}
                           type="button"
-                          onClick={() => setSelectedPlateId(null)}
+                          onClick={() => setSelectedPlateId(plate.index)}
                           className={`flex items-center rounded-lg border text-left transition-colors ${
                             splitFullscreen ? 'gap-1.5 p-1.5 w-full' : 'gap-2 p-2'
                           } ${
-                            selectedPlateId == null
+                            selectedPlateId === plate.index
                               ? 'border-bambu-green bg-bambu-green/10'
                               : 'border-bambu-dark-tertiary bg-bambu-dark-secondary hover:border-bambu-gray'
                           }`}
                         >
-                          <div className={`rounded bg-bambu-dark-tertiary flex items-center justify-center ${
-                            splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'
-                          }`}>
-                            <Layers className={`${splitFullscreen ? 'w-4 h-4' : 'w-5 h-5'} text-bambu-gray`} />
-                          </div>
+                          {plate.has_thumbnail && plate.thumbnail_url ? (
+                            <img
+                              src={withMediaToken(plate.thumbnail_url)}
+                              alt={`Plate ${plate.index}`}
+                              className={`${splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'} rounded object-cover bg-bambu-dark-tertiary`}
+                            />
+                          ) : (
+                            <div className={`rounded bg-bambu-dark-tertiary flex items-center justify-center ${
+                              splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'
+                            }`}>
+                              <Layers className={`${splitFullscreen ? 'w-4 h-4' : 'w-5 h-5'} text-bambu-gray`} />
+                            </div>
+                          )}
                           <div className="min-w-0 flex-1">
-                            <p className={`${splitFullscreen ? 'text-xs' : 'text-sm'} text-white font-medium truncate`}>{t('modelViewer.allPlates')}</p>
+                            <p className={`${splitFullscreen ? 'text-xs' : 'text-sm'} text-white font-medium truncate`}>
+                              {plate.name || t('modelViewer.plateNumber', { number: plate.index })}
+                            </p>
                             <p className={`${splitFullscreen ? 'text-[10px]' : 'text-xs'} text-bambu-gray truncate`}>
-                              {t('modelViewer.plateCount', { count: plates.length })}
+                              {t('modelViewer.objectCount', { count: plate.object_count ?? plate.objects?.length ?? 0 })}
                             </p>
                           </div>
-                          {selectedPlateId == null && (
+                          {selectedPlateId === plate.index && (
                             <Check className={`${splitFullscreen ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-bambu-green flex-shrink-0`} />
                           )}
                         </button>
-                        {pagedPlates.map((plate) => (
-                          <button
-                            key={plate.index}
-                            type="button"
-                            onClick={() => setSelectedPlateId(plate.index)}
-                            className={`flex items-center rounded-lg border text-left transition-colors ${
-                              splitFullscreen ? 'gap-1.5 p-1.5 w-full' : 'gap-2 p-2'
-                            } ${
-                              selectedPlateId === plate.index
-                                ? 'border-bambu-green bg-bambu-green/10'
-                                : 'border-bambu-dark-tertiary bg-bambu-dark-secondary hover:border-bambu-gray'
-                            }`}
-                          >
-                            {plate.has_thumbnail && plate.thumbnail_url ? (
-                              <img
-                                src={withStreamToken(plate.thumbnail_url)}
-                                alt={`Plate ${plate.index}`}
-                                className={`${splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'} rounded object-cover bg-bambu-dark-tertiary`}
-                              />
-                            ) : (
-                              <div className={`rounded bg-bambu-dark-tertiary flex items-center justify-center ${
-                                splitFullscreen ? 'w-8 h-8' : 'w-10 h-10'
-                              }`}>
-                                <Layers className={`${splitFullscreen ? 'w-4 h-4' : 'w-5 h-5'} text-bambu-gray`} />
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className={`${splitFullscreen ? 'text-xs' : 'text-sm'} text-white font-medium truncate`}>
-                                {plate.name || t('modelViewer.plateNumber', { number: plate.index })}
-                              </p>
-                              <p className={`${splitFullscreen ? 'text-[10px]' : 'text-xs'} text-bambu-gray truncate`}>
-                                {t('modelViewer.objectCount', { count: plate.object_count ?? plate.objects?.length ?? 0 })}
-                              </p>
-                            </div>
-                            {selectedPlateId === plate.index && (
-                              <Check className={`${splitFullscreen ? 'w-3.5 h-3.5' : 'w-4 h-4'} text-bambu-green flex-shrink-0`} />
-                            )}
-                          </button>
-                        ))}
-                      </div>
+                      ))}
                     </div>
-                    {(selectedPlate || shouldPaginatePlates) && (
-                      <div className="mt-auto pt-3 flex items-center gap-4 text-xs text-bambu-gray overflow-x-auto">
-                        {selectedPlate && (
-                          <div className="flex items-center gap-3 whitespace-nowrap">
-                            <span>{t('modelViewer.plateNumber', { number: selectedPlate.index })}</span>
-                            {selectedPlate.print_time_seconds != null && (
-                              <span>{t('modelViewer.eta', { minutes: Math.round(selectedPlate.print_time_seconds / 60) })}</span>
-                            )}
-                            {selectedPlate.filament_used_grams != null && (
-                              <span>{selectedPlate.filament_used_grams.toFixed(1)} g</span>
-                            )}
-                            {selectedPlate.filaments.length > 0 && (
-                              <span>{t('modelViewer.filamentCount', { count: selectedPlate.filaments.length })}</span>
-                            )}
-                          </div>
-                        )}
-                        {shouldPaginatePlates && (
-                          <div className={`flex items-center gap-2 whitespace-nowrap ${selectedPlate ? 'ml-auto' : ''}`}>
-                            <span>{t('modelViewer.pagination.pageOf', { current: platePage + 1, total: totalPlatePages })}</span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setPlatePage((prev) => Math.max(prev - 1, 0))}
-                                disabled={platePage === 0}
-                                className={`px-2 py-1 rounded border text-xs ${
-                                  platePage === 0
-                                    ? 'border-bambu-dark-tertiary text-bambu-gray/40 cursor-not-allowed'
-                                    : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-                                }`}
-                              >
-                                {t('modelViewer.pagination.prev')}
-                              </button>
-                              {(() => {
-                                const maxVisible = 5;
-                                let start = Math.max(0, platePage - Math.floor(maxVisible / 2));
-                                const end = Math.min(totalPlatePages, start + maxVisible);
-                                if (end - start < maxVisible) {
-                                  start = Math.max(0, end - maxVisible);
-                                }
-                                const pages = Array.from({ length: end - start }, (_, i) => start + i);
-
-                                return (
-                                  <>
-                                    {start > 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPlatePage(0)}
-                                        className={`px-2 py-1 rounded border text-xs ${
-                                          platePage === 0
-                                            ? 'border-bambu-green text-bambu-green'
-                                            : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-                                        }`}
-                                      >
-                                        1
-                                      </button>
-                                    )}
-                                    {start > 1 && <span className="px-1">…</span>}
-                                    {pages.map((pageNumber) => (
-                                      <button
-                                        key={pageNumber}
-                                        type="button"
-                                        onClick={() => setPlatePage(pageNumber)}
-                                        className={`px-2 py-1 rounded border text-xs ${
-                                          platePage === pageNumber
-                                            ? 'border-bambu-green text-bambu-green'
-                                            : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-                                        }`}
-                                      >
-                                        {pageNumber + 1}
-                                      </button>
-                                    ))}
-                                    {end < totalPlatePages - 1 && <span className="px-1">…</span>}
-                                    {end < totalPlatePages && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setPlatePage(totalPlatePages - 1)}
-                                        className={`px-2 py-1 rounded border text-xs ${
-                                          platePage === totalPlatePages - 1
-                                            ? 'border-bambu-green text-bambu-green'
-                                            : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-                                        }`}
-                                      >
-                                        {totalPlatePages}
-                                      </button>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                              <button
-                                type="button"
-                                onClick={() => setPlatePage((prev) => Math.min(prev + 1, totalPlatePages - 1))}
-                                disabled={platePage >= totalPlatePages - 1}
-                                className={`px-2 py-1 rounded border text-xs ${
-                                  platePage >= totalPlatePages - 1
-                                    ? 'border-bambu-dark-tertiary text-bambu-gray/40 cursor-not-allowed'
-                                    : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-                                }`}
-                              >
-                                {t('modelViewer.pagination.next')}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
+                  {(selectedPlate || shouldPaginatePlates) && (
+                    <div className="mt-auto pt-3 flex items-center gap-4 text-xs text-bambu-gray overflow-x-auto">
+                      {selectedPlate && (
+                        <div className="flex items-center gap-3 whitespace-nowrap">
+                          <span>{t('modelViewer.plateNumber', { number: selectedPlate.index })}</span>
+                          {selectedPlate.print_time_seconds != null && (
+                            <span>{t('modelViewer.eta', { minutes: Math.round(selectedPlate.print_time_seconds / 60) })}</span>
+                          )}
+                          {selectedPlate.filament_used_grams != null && (
+                            <span>{selectedPlate.filament_used_grams.toFixed(1)} g</span>
+                          )}
+                          {selectedPlate.filaments.length > 0 && (
+                            <span>{t('modelViewer.filamentCount', { count: selectedPlate.filaments.length })}</span>
+                          )}
+                        </div>
+                      )}
+                      {shouldPaginatePlates && (
+                        <div className={`flex items-center gap-2 whitespace-nowrap ${selectedPlate ? 'ml-auto' : ''}`}>
+                          <span>{t('modelViewer.pagination.pageOf', { current: platePage + 1, total: totalPlatePages })}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setPlatePage((prev) => Math.max(prev - 1, 0))}
+                              disabled={platePage === 0}
+                              className={`px-2 py-1 rounded border text-xs ${
+                                platePage === 0
+                                  ? 'border-bambu-dark-tertiary text-bambu-gray/40 cursor-not-allowed'
+                                  : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
+                              }`}
+                            >
+                              {t('modelViewer.pagination.prev')}
+                            </button>
+                            {(() => {
+                              const maxVisible = 5;
+                              let start = Math.max(0, platePage - Math.floor(maxVisible / 2));
+                              const end = Math.min(totalPlatePages, start + maxVisible);
+                              if (end - start < maxVisible) {
+                                start = Math.max(0, end - maxVisible);
+                              }
+                              const pages = Array.from({ length: end - start }, (_, i) => start + i);
+
+                              return (
+                                <>
+                                  {start > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPlatePage(0)}
+                                      className={`px-2 py-1 rounded border text-xs ${
+                                        platePage === 0
+                                          ? 'border-bambu-green text-bambu-green'
+                                          : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
+                                      }`}
+                                    >
+                                      1
+                                    </button>
+                                  )}
+                                  {start > 1 && <span className="px-1">…</span>}
+                                  {pages.map((pageNumber) => (
+                                    <button
+                                      key={pageNumber}
+                                      type="button"
+                                      onClick={() => setPlatePage(pageNumber)}
+                                      className={`px-2 py-1 rounded border text-xs ${
+                                        platePage === pageNumber
+                                          ? 'border-bambu-green text-bambu-green'
+                                          : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
+                                      }`}
+                                    >
+                                      {pageNumber + 1}
+                                    </button>
+                                  ))}
+                                  {end < totalPlatePages - 1 && <span className="px-1">…</span>}
+                                  {end < totalPlatePages && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPlatePage(totalPlatePages - 1)}
+                                      className={`px-2 py-1 rounded border text-xs ${
+                                        platePage === totalPlatePages - 1
+                                          ? 'border-bambu-green text-bambu-green'
+                                          : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
+                                      }`}
+                                    >
+                                      {totalPlatePages}
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+                            <button
+                              type="button"
+                              onClick={() => setPlatePage((prev) => Math.min(prev + 1, totalPlatePages - 1))}
+                              disabled={platePage >= totalPlatePages - 1}
+                              className={`px-2 py-1 rounded border text-xs ${
+                                platePage >= totalPlatePages - 1
+                                  ? 'border-bambu-dark-tertiary text-bambu-gray/40 cursor-not-allowed'
+                                  : 'border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
+                              }`}
+                            >
+                              {t('modelViewer.pagination.next')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-              {splitFullscreen && (
-                <div
-                  role="separator"
-                  aria-orientation="horizontal"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    setIsDraggingDivider(true);
-                    setHasCustomSplit(true);
-                  }}
-                  className={`h-2 cursor-row-resize flex items-center justify-center ${
-                    isDraggingDivider ? 'bg-bambu-dark-tertiary' : 'bg-bambu-dark-secondary/60 hover:bg-bambu-dark-tertiary'
-                  }`}
-                >
-                  <div className="w-12 h-1 rounded-full bg-bambu-gray/50" />
-                </div>
-              )}
-              <div className={`flex-1 ${splitFullscreen ? 'min-h-0' : ''}`}>
-                  <ModelViewer
-                    url={isLibrary
-                      ? api.getLibraryFileDownloadUrl(libraryFileId!)
-                      : (capabilities.has_source
-                        ? api.getSource3mfDownloadUrl(archiveId!)
-                        : api.getArchiveDownload(archiveId!))}
-                    fileType={fileType}
-                    buildVolume={capabilities.build_volume}
-                    filamentColors={capabilities.filament_colors}
-                    selectedPlateId={selectedPlateId}
-                    className="w-full h-full"
-                  />
               </div>
+            )}
+            {splitFullscreen && (
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setIsDraggingDivider(true);
+                  setHasCustomSplit(true);
+                }}
+                className={`h-2 cursor-row-resize flex items-center justify-center ${
+                  isDraggingDivider ? 'bg-bambu-dark-tertiary' : 'bg-bambu-dark-secondary/60 hover:bg-bambu-dark-tertiary'
+                }`}
+              >
+                <div className="w-12 h-1 rounded-full bg-bambu-gray/50" />
+              </div>
+            )}
+            <div
+              className={`flex-1 ${splitFullscreen ? 'min-h-0' : ''}`}
+              data-testid="model-viewer-area"
+              onDoubleClick={toggleFullscreen}
+            >
+                <ModelViewer
+                  url={isLibrary
+                    ? api.getLibraryFileDownloadUrl(libraryFileId!)
+                    : (capabilities.has_source
+                      ? api.getSource3mfDownloadUrl(archiveId!)
+                      : api.getArchiveDownload(archiveId!))}
+                  fileType={fileType}
+                  buildVolume={capabilities.build_volume}
+                  filamentColors={capabilities.filament_colors}
+                  selectedPlateId={selectedPlateId}
+                  className="w-full h-full"
+                  onSnapshot={onSnapshot}
+                />
             </div>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-bambu-gray">
-              {t('modelViewer.noPreview')}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-bambu-gray">
+            {t('modelViewer.noPreview')}
+          </div>
+        )}
       </div>
-    </div>
+    </PreviewModalShell>
   );
 }

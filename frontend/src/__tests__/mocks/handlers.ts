@@ -383,6 +383,11 @@ export const handlers = [
   // Version / Health
   // ========================================================================
 
+  // Announcements from the maintainers: none by default.
+  http.get('/api/v1/announcements', () => {
+    return HttpResponse.json({ visible: true, announcements: [] });
+  }),
+
   http.get('/api/v1/version', () => {
     return HttpResponse.json({
       version: '0.1.5',

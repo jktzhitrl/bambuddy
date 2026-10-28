@@ -6,8 +6,27 @@ import { Layers, Settings2, Package, Unlink, Link2, X } from 'lucide-react';
 import type { SpoolBuddyOutletContext } from '../../components/spoolbuddy/SpoolBuddyLayout';
 import { api } from '../../api/client';
 import type { PrinterStatus, AMSTray, SpoolAssignment } from '../../api/client';
-import { getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoolTag, formatSlotLabel, isBambuLabSpool, resolveSlotNozzleDiameter } from '../../utils/amsHelpers';
-import { getSwatchStyle } from '../../utils/colors';
+import { getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoolTag, formatSlotLabel, isBambuLabSpool, resolveSlotNozzleDiameter, slotPresetDescribesTray } from '../../utils/amsHelpers';
+import { getSwatchStyle, resolveSpoolColorName } from '../../utils/colors';
+import { mapModelCode } from '../../utils/printerModel';
+import { spoolSwatchStyle } from '../../components/spoolbuddy/spoolPaint';
+
+/**
+ * " - Candy Red", or nothing when the colour has no name we can show.
+ *
+ * Not `spool.color_name`: a Bambu tag often carries no colour name, and
+ * Spoolman has no field for one at all, so the stored value is frequently
+ * empty or the spool's subtype standing in for it. The catalog resolves the
+ * swatch's own hex instead (#3090).
+ */
+function colorNameSuffix(spool: {
+  color_name: string | null;
+  rgba: string | null;
+  color_name_is_synthesized?: boolean;
+}): string {
+  const name = resolveSpoolColorName(spool.color_name, spool.rgba, spool.color_name_is_synthesized);
+  return name ? ` - ${name}` : '';
+}
 import { AmsUnitCard, HumidityIndicator, TemperatureIndicator, NozzleBadge } from '../../components/spoolbuddy/AmsUnitCard';
 import type { AmsThresholds } from '../../components/spoolbuddy/AmsUnitCard';
 import { ConfigureAmsSlotModal } from '../../components/ConfigureAmsSlotModal';
@@ -19,21 +38,6 @@ function getAmsName(amsId: number): string {
   if (amsId <= 3) return `AMS ${String.fromCharCode(65 + amsId)}`;
   if (amsId >= 128 && amsId <= 135) return `AMS HT ${String.fromCharCode(65 + amsId - 128)}`;
   return `AMS ${amsId}`;
-}
-
-function mapModelCode(ssdpModel: string | null): string {
-  if (!ssdpModel) return '';
-  const modelMap: Record<string, string> = {
-    'O1D': 'H2D', 'O1E': 'H2D Pro', 'O2D': 'H2D Pro', 'O1C': 'H2C', 'O1C2': 'H2C', 'O1S': 'H2S',
-    'BL-P001': 'X1C', 'BL-P002': 'X1', 'BL-P003': 'X1E',
-    'N6': 'X2D',
-    'N9': 'A2L',
-    'C11': 'P1S', 'C12': 'P1P', 'C13': 'P2S',
-    'N2S': 'A1', 'N1': 'A1 Mini',
-    'X1C': 'X1C', 'X1': 'X1', 'X1E': 'X1E', 'X2D': 'X2D', 'P1S': 'P1S', 'P1P': 'P1P', 'P2S': 'P2S',
-    'A1': 'A1', 'A1 Mini': 'A1 Mini', 'A2L': 'A2L', 'H2D': 'H2D', 'H2D Pro': 'H2D Pro', 'H2C': 'H2C', 'H2S': 'H2S',
-  };
-  return modelMap[ssdpModel] || ssdpModel;
 }
 
 function isTrayEmpty(tray: AMSTray): boolean {
@@ -389,7 +393,10 @@ export function SpoolBuddyAmsPage() {
       trayInfoIdx: tray?.tray_info_idx || undefined,
       extruderId: isDualNozzle ? extruderId : undefined,
       caliIdx: tray?.cali_idx,
-      savedPresetId: slotPreset?.preset_id,
+      // Only while it still describes the slot (#3216).
+      savedPresetId: slotPresetDescribesTray(slotPreset?.preset_id, tray?.tray_info_idx, slotPreset?.tray_info_idx)
+        ? slotPreset?.preset_id
+        : undefined,
       location: `${getAmsName(amsId)} Slot ${trayId + 1}`,
     };
 
@@ -411,7 +418,9 @@ export function SpoolBuddyAmsPage() {
       trayInfoIdx: extTray.tray_info_idx || undefined,
       extruderId: isDualNozzle ? (extTrayId === 254 ? 1 : 0) : undefined,
       caliIdx: extTray.cali_idx,
-      savedPresetId: extSlotPreset?.preset_id,
+      savedPresetId: slotPresetDescribesTray(extSlotPreset?.preset_id, extTray.tray_info_idx, extSlotPreset?.tray_info_idx)
+        ? extSlotPreset?.preset_id
+        : undefined,
       location: isDualNozzle
         ? (extTrayId === 254 ? 'Ext-L' : 'Ext-R')
         : 'External',
@@ -751,13 +760,13 @@ export function SpoolBuddyAmsPage() {
                       {assignment.spool.rgba && (
                         <span
                           className="w-3 h-3 rounded-full border border-black/20 flex-shrink-0"
-                          style={getSwatchStyle(assignment.spool.rgba)}
+                          style={spoolSwatchStyle(assignment.spool) ?? getSwatchStyle(assignment.spool.rgba)}
                         />
                       )}
                       <span className="text-sm text-white">
                         {assignment.spool.brand ? `${assignment.spool.brand} ` : ''}{assignment.spool.material}
                         {assignment.spool.subtype ? ` ${assignment.spool.subtype}` : ''}
-                        {assignment.spool.color_name ? ` - ${assignment.spool.color_name}` : ''}
+                        {colorNameSuffix(assignment.spool)}
                       </span>
                       <span className="text-[10px] font-mono text-zinc-500 shrink-0 ml-auto">#{assignment.spool.id}</span>
                     </div>
@@ -785,13 +794,13 @@ export function SpoolBuddyAmsPage() {
                       {spoolmanAssignedSpool.rgba && (
                         <span
                           className="w-3 h-3 rounded-full border border-black/20 flex-shrink-0"
-                          style={getSwatchStyle(spoolmanAssignedSpool.rgba)}
+                          style={spoolSwatchStyle(spoolmanAssignedSpool) ?? getSwatchStyle(spoolmanAssignedSpool.rgba)}
                         />
                       )}
                       <span className="text-sm text-white">
                         {spoolmanAssignedSpool.brand ? `${spoolmanAssignedSpool.brand} ` : ''}{spoolmanAssignedSpool.material}
                         {spoolmanAssignedSpool.subtype ? ` ${spoolmanAssignedSpool.subtype}` : ''}
-                        {spoolmanAssignedSpool.color_name ? ` - ${spoolmanAssignedSpool.color_name}` : ''}
+                        {colorNameSuffix(spoolmanAssignedSpool)}
                       </span>
                     </div>
                   </div>

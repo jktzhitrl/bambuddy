@@ -25,12 +25,14 @@ from backend.app.core.auth import (
     authenticate_user,
     authenticate_user_by_email,
     create_access_token,
+    create_media_token,
     create_websocket_token,
     get_current_active_user,
     get_password_hash,
     get_user_by_email,
     get_user_by_username,
     is_jti_revoked,
+    require_auth_if_enabled,
     resolve_apikey_owner,
     resolve_session_max_minutes,
     revoke_jti,
@@ -346,10 +348,8 @@ async def setup_auth(request: SetupRequest, db: AsyncSession = Depends(get_db)):
             # (#2530). Only migrate when there is exactly one obvious owner:
             # handing another admin's session a Bambu credential is not a
             # guess worth making.
-            from backend.app.api.routes.cloud import (
-                get_stored_token,
-                migrate_global_cloud_token_to_user,
-            )
+            from backend.app.api.routes.cloud import migrate_global_cloud_token_to_user
+            from backend.app.services.bambu_cloud_credentials import get_stored_token
 
             if admin_created:
                 cloud_owner = admin_user
@@ -483,6 +483,7 @@ async def login(raw_request: Request, request: LoginRequest, response: Response,
     user = None
     # Check if LDAP is enabled
     ldap_user = None
+    ldap_user_provisioned = False
     ldap_settings = await _get_ldap_settings(db)
     if ldap_settings:
         try:
@@ -506,10 +507,14 @@ async def login(raw_request: Request, request: LoginRequest, response: Response,
                             # User doesn't exist and auto-provision is off
                             ldap_user = None
                         else:
-                            # Auto-provision LDAP user
+                            # Auto-provision LDAP user. Provisioning already sets the
+                            # email, groups and finance defaults the sync below would,
+                            # so a new user skips it (it also logged the default-group
+                            # warning a second time, #3197).
                             user = await _provision_ldap_user(db, ldap_user, ldap_config)
+                            ldap_user_provisioned = True
 
-                    if user and ldap_user:
+                    if user and ldap_user and not ldap_user_provisioned:
                         # Update email and group mappings on each login
                         await _sync_ldap_user(db, user, ldap_user, ldap_config)
                         # Keep finance defaults idempotently in sync for LDAP users
@@ -657,6 +662,30 @@ async def mint_websocket_token(
     """
     username = current_user.username if current_user is not None else None
     return {"token": await create_websocket_token(username)}
+
+
+@router.post("/media-token")
+async def mint_media_token(
+    current_user: User | None = Depends(require_auth_if_enabled),
+):
+    """Mint a short-lived token for ``<img>`` / ``<video>`` media routes (#3025).
+
+    Thumbnails, plate previews, timelapses, cover images and sidebar icons are
+    loaded by the browser as element ``src`` URLs, which cannot carry an
+    ``Authorization`` header. Those routes used to accept the *camera stream*
+    token instead, which made ``camera:view`` a prerequisite for seeing a
+    library thumbnail -- on a home install, handing someone the live feed of
+    the room the printer is in just so their own files render.
+
+    So this mints behind plain authentication: any signed-in user may ask, and
+    what the token can actually reach is decided per request by the same
+    permission and ownership rules as the resource's other routes. It is not a
+    camera credential and does not open the camera routes.
+
+    Returns ``{"token": <opaque string>}``, valid for 60 minutes.
+    """
+    username = current_user.username if current_user is not None else None
+    return {"token": await create_media_token(username)}
 
 
 @router.get("/me", response_model=UserResponse)

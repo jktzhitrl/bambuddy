@@ -438,6 +438,36 @@ describe('useWebSocket hook', () => {
       vi.unstubAllGlobals();
     });
 
+    it('re-reads announcements on announcements_changed, so the dot appears without a reload', async () => {
+      vi.useFakeTimers();
+      const { useWebSocket } = await import('../../hooks/useWebSocket');
+
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      renderHook(() => useWebSocket(), {
+        wrapper: createWrapper(queryClient),
+      });
+
+      const ws = await waitForWs();
+
+      act(() => {
+        ws.open();
+      });
+
+      act(() => {
+        ws.simulateMessage({ type: 'announcements_changed' });
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['announcements'] });
+
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
     it('invalidates inventory queries on inventory_changed message', async () => {
       vi.useFakeTimers();
       const { useWebSocket } = await import('../../hooks/useWebSocket');
@@ -465,6 +495,11 @@ describe('useWebSocket hook', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['inventory-spools'] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['spoolman-inventory-spools'] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['inventory-locations'] });
+      // #2988: without this key the supplier broadcast reached nothing, so a
+      // supplier created in one tab never showed up in another.
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['inventory-suppliers'] });
+      // The per-material-number aggregate is derived from the same rows (#2870).
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['material-number-stats'] });
 
       vi.useRealTimers();
       vi.unstubAllGlobals();

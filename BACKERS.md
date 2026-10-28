@@ -31,7 +31,7 @@ If you sponsor and your name isn't here within 48h, please write an email to mar
 - [@rstocks](https://github.com/rstocks)
 - [@Neasham21](https://github.com/Neasham21)
 - [@strikerfab](https://github.com/strikerfab)
-- [@Thomansky](https://github.com/Thomansky)
+- [@TheVikingTech(https://github.com/TheVikingTech)
 
 ## Supporters ($15/mo+)
 
@@ -63,7 +63,6 @@ If you sponsor and your name isn't here within 48h, please write an email to mar
 - [@boernie](https://github.com/boernie)
 - [@qoatzelcoat](https://github.com/qoatzelcoat)
 - [@Sanaki](https://github.com/Sanaki)
-- [@jlofshult](https://github.com/jlofshult)
 - [@TriadX1](https://github.com/TriadX1)
 - [@hazzardr](https://github.com/hazzardr)
 - [@Shihchiun](https://github.com/Shihchiun)
@@ -73,6 +72,7 @@ If you sponsor and your name isn't here within 48h, please write an email to mar
 - [@g7ufo](https://github.com/g7ufo)
 - [@MorganMLGman](https://github.com/MorganMLGman)
 - [@NeighborGeek](https://github.com/NeighborGeek)
+- [@frantiseklorenc](https://github.com/frantiseklorenc)
 
 ---
 

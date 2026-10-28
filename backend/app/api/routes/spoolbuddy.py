@@ -421,7 +421,16 @@ async def nfc_tag_scanned(
                             "material": mapped["material"],
                             "subtype": mapped["subtype"],
                             "color_name": mapped["color_name"],
+                            # Spoolman stores no colour name, so `color_name`
+                            # here is usually the spool's subtype standing in
+                            # for one. The kiosk needs to know that to prefer
+                            # the colour catalog over "Silk+" (#3090).
+                            "color_name_is_synthesized": mapped["color_name_is_synthesized"],
                             "rgba": mapped["rgba"],
+                            # The kiosk paints the disc from these, as the
+                            # Filament page does (#3033).
+                            "extra_colors": mapped["extra_colors"],
+                            "effect_type": mapped["effect_type"],
                             "brand": mapped["brand"],
                             "label_weight": mapped["label_weight"],
                             "core_weight": mapped["core_weight"],
@@ -485,7 +494,12 @@ async def nfc_tag_scanned(
                         "material": spool.material,
                         "subtype": spool.subtype,
                         "color_name": spool.color_name,
+                        # Local inventory stores what the user or their tag
+                        # set, and nothing else — never a stand-in (#3090).
+                        "color_name_is_synthesized": False,
                         "rgba": spool.rgba,
+                        "extra_colors": spool.extra_colors,
+                        "effect_type": spool.effect_type,
                         "brand": spool.brand,
                         "label_weight": spool.label_weight,
                         "core_weight": spool.core_weight,
@@ -877,7 +891,7 @@ async def update_spool_weight(
     update while the Spoolman row the user is actually looking at stayed
     unchanged (#1530). Mirrors the routing already used by ``nfc/tag-scanned``.
     """
-    from backend.app.api.routes._spoolman_helpers import _safe_float
+    from backend.app.api.routes._spoolman_helpers import _safe_float, spoolman_net_weight, spoolman_tare
     from backend.app.models.spool import Spool
 
     sm_client = await _get_spoolman_client_or_none(db)
@@ -906,20 +920,18 @@ async def update_spool_weight(
     async with _translate_spoolbuddy_errors():
         sm_spool = await sm_client.get_spool(req.spool_id)
 
-    filament = sm_spool.get("filament") or {}
-    spool_tare = sm_spool.get("spool_weight")
-    raw_tare = spool_tare if spool_tare is not None else filament.get("spool_weight")
+    core_weight, tare_source = spoolman_tare(sm_spool)
     spool_weight_warning: str | None = None
-    if raw_tare is None:
+    if tare_source == "fallback":
         logger.warning(
-            "Spoolman spool %d has no spool_weight set; using 250g fallback for tare",
+            "Spoolman spool %d has no spool_weight or vendor empty_spool_weight set; using 250g fallback for tare",
             req.spool_id,
         )
         spool_weight_warning = (
-            "spool_weight_not_set: Spoolman filament has no spool_weight configured; weight estimate uses 250g fallback"
+            "spool_weight_not_set: Spoolman spool, filament and vendor have no empty-spool weight configured; "
+            "weight estimate uses 250g fallback"
         )
-    core_weight = _safe_float(raw_tare, 250.0)
-    label_weight = _safe_float(filament.get("weight"), 1000.0)
+    label_weight = _safe_float(spoolman_net_weight(sm_spool), 1000.0)
     remaining_weight = max(0.0, req.weight_grams - core_weight)
 
     async with _translate_spoolbuddy_errors():

@@ -9,6 +9,7 @@ from pathlib import Path
 import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, inspect, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -53,6 +54,7 @@ from backend.app.services.print_batch import (
     refresh_batch_status_for_item,
 )
 from backend.app.services.print_cost_estimate import estimate_queue_source_cost
+from backend.app.services.queue_position import lock_queue_positions, max_queue_position
 from backend.app.utils.printer_models import (
     is_gcode_compatible,
 )
@@ -471,6 +473,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "timelapse": item.timelapse,
         "use_ams": item.use_ams,
         "nozzle_offset_cali": item.nozzle_offset_cali,
+        "confirm_outcome": item.confirm_outcome,
         "preheat_override": item.preheat_override,
         "preheat_chamber_target_override": item.preheat_chamber_target_override,
         "status": item.status,
@@ -613,7 +616,12 @@ async def list_queue(
             # Cross-model candidates (#671) and their files, for the card label.
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
-        .order_by(PrintQueueItem.printer_id.nulls_first(), PrintQueueItem.position)
+        # The order the scheduler dispatches in (#3200), so the first pending
+        # item for a printer is the one it will start next -- which is what the
+        # printer card's "Next in queue" shows. Sorting by printer first put
+        # every "Any <model>" job (no printer_id) ahead of a job pinned to that
+        # printer, whatever their positions.
+        .order_by(PrintQueueItem.position, PrintQueueItem.id)
     )
     if user is not None and not can_read_all:
         query = query.where(PrintQueueItem.created_by_id == user.id)
@@ -906,29 +914,34 @@ async def add_to_queue(
     # Extract filament types for model-based assignment (used by scheduler for validation)
     required_filament_types = None
     file_path = None
+    # Get file path from archive or library file
+    if archive:
+        file_path = settings.base_dir / archive.file_path
+    elif library_file:
+        lib_path = Path(library_file.file_path)
+        file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
     if target_model_norm:
-        # Get file path from archive or library file
-        if archive:
-            file_path = settings.base_dir / archive.file_path
-        elif library_file:
-            lib_path = Path(library_file.file_path)
-            file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
-
         if file_path and file_path.exists():
             filament_types = _extract_filament_types_from_3mf(file_path, data.plate_id)
             if filament_types:
                 required_filament_types = json.dumps(filament_types)
                 logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-    # If filament overrides are provided, update required_filament_types to match override types
+    # If filament overrides are provided, update required_filament_types to match override types.
+    # A specific-printer job keeps its overrides too (#3133): an override chosen for
+    # "Any P2S" survives the switch to one P2S in the print dialog, and when the
+    # dialog could not resolve every tray the scheduler recomputes the mapping at
+    # dispatch — against the 3MF's filament, unless the row still says otherwise.
+    # The type list below stays model-only; it gates which printer of a model is
+    # eligible, which a printer-targeted job has already settled.
     filament_overrides_json = None
-    if data.filament_overrides and target_model_norm:
+    if data.filament_overrides and (target_model_norm or data.printer_id is not None):
         plate_overrides = overrides_for_plate(data.filament_overrides, file_path, data.plate_id)
         if plate_overrides:
             filament_overrides_json = json.dumps(plate_overrides)
             # Update required_filament_types from overrides so scheduler validates against overridden types
             override_types = sorted({o["type"] for o in plate_overrides if "type" in o})
-            if override_types:
+            if override_types and target_model_norm:
                 # Merge with existing types (overrides may only cover some slots)
                 existing_types = set(json.loads(required_filament_types)) if required_filament_types else set()
                 # Replace types for overridden slots, keep others
@@ -971,6 +984,15 @@ async def add_to_queue(
                 batch_name_base = library_file.file_metadata.get("print_name") or library_file.filename
             else:
                 batch_name_base = library_file.filename
+        elif variant_specs:
+            # A cross-model job carries neither archive_id nor library_file_id --
+            # the candidates are the files (#671) -- so both branches above miss
+            # and every such batch was named "Batch". Unreachable until the print
+            # dialog could ask for more than one copy of one (#3101). Name it
+            # after the first candidate, which is what the dialog names the job
+            # after and what the resolver prefers when both printers are free.
+            first_file = variant_specs[0][1]
+            batch_name_base = (first_file.file_metadata or {}).get("print_name") or first_file.filename or "Batch"
         batch_name_base = batch_name_base.replace(".gcode.3mf", "").replace(".3mf", "")
 
         batch = PrintBatch(
@@ -985,47 +1007,14 @@ async def add_to_queue(
         await db.flush()  # Get batch.id before creating items
         batch_id = batch.id
 
-    # Get queue scope for this printer (or for unassigned/model-based items).
-    if data.printer_id is not None:
-        queue_scope = (
-            PrintQueueItem.printer_id == data.printer_id,
-            PrintQueueItem.status == "pending",
-        )
-    else:
-        # For unassigned/model-based items, scope across all unassigned.
-        queue_scope = (
-            PrintQueueItem.printer_id.is_(None),
-            PrintQueueItem.status == "pending",
-        )
-
-    # Serialize concurrent queue inserts to the same scope (#1625-followup).
-    # The race: two concurrent ASAP inserts both compute MAX(position) before
-    # either commits; in an empty scope, both INSERT at position 1 (duplicate).
-    # In a non-empty scope, Postgres's row-level locks on the UPDATE shift
-    # serialize naturally, but the empty-scope path has no rows to lock.
-    # A transaction-scoped advisory lock keyed on the printer_id closes that
-    # window; the lock is released automatically at commit/rollback. Different
-    # printers don't contend. SQLite serializes writes implicitly so this is a
-    # no-op there.
-    #
-    # Dialect is checked against the actual session binding, NOT the
-    # `is_sqlite()` helper, because the test fixture overrides `get_db` with a
-    # SQLite engine while `settings.database_url` still points at Postgres
-    # (the helper reads settings). Inspecting the connection directly is the
-    # right shape for any code that mutates SQL based on the live dialect.
-    from sqlalchemy import text
-
-    bind = db.get_bind()
-    if bind.dialect.name == "postgresql":
-        scope_key = data.printer_id if data.printer_id is not None else 0
-        # 1625 namespaces the lock so it can't collide with other advisory
-        # locks elsewhere in the codebase.
-        await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": scope_key})
+    # Positions are one sequence across every pending item (#3200), so a new
+    # item lands relative to the whole list, not to its printer's share of it.
+    queue_scope = (PrintQueueItem.status == "pending",)
+    await lock_queue_positions(db)
 
     insert_position = max(1, data.insert_position or 1)
     if data.insert_at_top or data.insert_position is not None:
-        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
-        max_pos = result.scalar() or 0
+        max_pos = await max_queue_position(db)
         insert_position = min(insert_position, max_pos + 1)
         await db.execute(
             update(PrintQueueItem)
@@ -1035,9 +1024,7 @@ async def add_to_queue(
         )
         start_position = insert_position
     else:
-        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
-        max_pos = result.scalar() or 0
-        start_position = max_pos + 1
+        start_position = await max_queue_position(db) + 1
 
     # Resolve print_time_seconds for SJF scheduling (cache on item at creation)
     cached_print_time = None
@@ -1178,6 +1165,7 @@ async def add_to_queue(
             timelapse=data.timelapse,
             use_ams=data.use_ams,
             nozzle_offset_cali=data.nozzle_offset_cali,
+            confirm_outcome=data.confirm_outcome,
             preheat_override=data.preheat_override,
             preheat_chamber_target_override=data.preheat_chamber_target_override,
             gcode_injection=data.gcode_injection,
@@ -1410,6 +1398,12 @@ async def _load_batch_for_write(
     return batch
 
 
+# Deliberately without the existing batch's id: the caller may not be allowed
+# to read it. They can look it up by the pair, which applies the usual
+# ownership rules.
+_EXTERNAL_REF_TAKEN = "A batch for this external_source and external_ref already exists"
+
+
 @router.post("/batches", response_model=PrintBatchResponse)
 async def create_batch(
     data: PrintBatchCreate,
@@ -1435,6 +1429,15 @@ async def create_batch(
 
     plate_targets = _validate_plate_targets(data.plates)
     await _validate_batch_project(db, data.project_id, current_user)
+    if data.external_source is not None:
+        existing = await db.execute(
+            select(PrintBatch.id).where(
+                PrintBatch.external_source == data.external_source,
+                PrintBatch.external_ref == data.external_ref,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(409, _EXTERNAL_REF_TAKEN)
 
     batch = PrintBatch(
         name=data.name.strip()[:255],
@@ -1446,9 +1449,17 @@ async def create_batch(
         project_id=data.project_id,
         due_date=data.due_date,
         notes=data.notes,
+        external_source=data.external_source,
+        external_ref=data.external_ref,
     )
     db.add(batch)
-    await db.flush()  # Need batch.id before assigning to items
+    try:
+        await db.flush()  # Need batch.id before assigning to items
+    except IntegrityError:
+        # Lost a race with a concurrent create for the same external record:
+        # the unique index caught what the lookup above could not.
+        await db.rollback()
+        raise HTTPException(409, _EXTERNAL_REF_TAKEN) from None
 
     if plate_targets is not None:
         for target in plate_targets:
@@ -1649,6 +1660,8 @@ async def ungroup_batch(
 @router.get("/batches", response_model=list[PrintBatchResponse])
 async def list_batches(
     status: str | None = Query(None, description="Filter by status (active, completed, cancelled)"),
+    external_source: str | None = Query(None, description="Filter by the integration that created the batch"),
+    external_ref: str | None = Query(None, description="Filter by the external record the batch fulfils"),
     db: AsyncSession = Depends(get_db),
     auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
@@ -1676,6 +1689,10 @@ async def list_batches(
     )
     if status:
         query = query.where(PrintBatch.status == status)
+    if external_source is not None:
+        query = query.where(PrintBatch.external_source == external_source)
+    if external_ref is not None:
+        query = query.where(PrintBatch.external_ref == external_ref)
     if current_user is not None and not can_read_all:
         query = query.where(PrintBatch.created_by_id == current_user.id)
     result = await db.execute(query)
@@ -1794,6 +1811,8 @@ async def _build_batch_response(
         project_id=batch.project_id,
         due_date=batch.due_date,
         notes=batch.notes,
+        external_source=batch.external_source,
+        external_ref=batch.external_ref,
         pending_count=progress.pending,
         printing_count=progress.printing,
         completed_count=progress.completed,

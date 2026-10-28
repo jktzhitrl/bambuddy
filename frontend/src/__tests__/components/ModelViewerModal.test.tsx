@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { ModelViewerModal } from '../../components/ModelViewerModal';
-import { setStreamToken } from '../../api/client';
+import { setMediaToken } from '../../api/client';
 import { openInSlicer } from '../../utils/slicer';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
@@ -202,10 +202,54 @@ describe('ModelViewerModal', () => {
         // Look for the maximize icon button
         const buttons = screen.getAllByRole('button');
         const fullscreenButton = buttons.find(
-          (btn) => btn.querySelector('.lucide-maximize-2') || btn.title === 'Enter fullscreen'
+          (btn) => btn.querySelector('.lucide-maximize-2') || btn.title === 'Fullscreen'
         );
         expect(fullscreenButton).toBeInTheDocument();
       });
+    });
+
+    it('double-click on the viewer requests fullscreen for the panel (#2976)', async () => {
+      const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+      Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', { configurable: true, value: requestFullscreen });
+      try {
+        render(
+          <ModelViewerModal
+            archiveId={1}
+            title="Test Model"
+            onClose={mockOnClose}
+          />
+        );
+        const viewer = await screen.findByTestId('model-viewer-area');
+
+        fireEvent.doubleClick(viewer);
+
+        expect(requestFullscreen).toHaveBeenCalledTimes(1);
+        const panel = screen.getByText('Test Model').closest('.flex-col');
+        expect(requestFullscreen.mock.instances[0]).toBe(panel);
+      } finally {
+        delete (document as { fullscreenEnabled?: boolean }).fullscreenEnabled;
+        delete (HTMLElement.prototype as { requestFullscreen?: () => Promise<void> }).requestFullscreen;
+      }
+    });
+
+    it('fills the viewport as a fallback where the Fullscreen API is missing', async () => {
+      render(
+        <ModelViewerModal
+          archiveId={1}
+          title="Test Model"
+          onClose={mockOnClose}
+        />
+      );
+      const viewer = await screen.findByTestId('model-viewer-area');
+      const panel = screen.getByText('Test Model').closest('.flex-col') as HTMLElement;
+      // Windowed: the size every preview shares (#2976), not a per-modal max-w.
+      expect(panel.className).toContain('w-[min(1800px,96vw)]');
+
+      fireEvent.doubleClick(viewer);
+
+      expect(panel.className).toContain('max-w-none');
+      expect(screen.getByTitle('Exit fullscreen')).toBeInTheDocument();
     });
   });
 
@@ -343,12 +387,14 @@ describe('ModelViewerModal', () => {
       });
     });
 
-    // #2661: plate-thumbnail endpoints are gated behind a camera stream token
+    // #2661: plate-thumbnail endpoints are gated behind a query token
     // (an <img> can't send a Bearer header), so the src must carry ?token=.
     // Without it the 3D Preview thumbnails 401 while the Slice dialog (which
     // already appends the token) shows the same file's thumbnails fine.
-    it('appends the camera stream token to plate thumbnail URLs', async () => {
-      setStreamToken('tok-2661');
+    // #3025 moved these off the camera token onto the media token, so a user
+    // without camera:view can see them; the src requirement is unchanged.
+    it('appends the media token to plate thumbnail URLs', async () => {
+      setMediaToken('tok-2661');
       try {
         render(
           <ModelViewerModal
@@ -366,7 +412,7 @@ describe('ModelViewerModal', () => {
         expect(thumb.src).toContain('/api/v1/archives/1/plates/1/thumbnail');
         expect(thumb.src).toContain('token=tok-2661');
       } finally {
-        setStreamToken(null);
+        setMediaToken(null);
       }
     });
 
@@ -666,7 +712,11 @@ describe('ModelViewerModal', () => {
       expect(screen.queryByRole('button', { name: 'More slicer options' })).not.toBeInTheDocument();
     });
 
-    it('offers the desktop handoff for an STL library file', async () => {
+    it('offers the desktop handoff for an STL library file, naming the slicer', async () => {
+      // Default settings mean Bambu Studio is preferred, and its protocol
+      // handler takes 3MF only (#3029) -- so OrcaSlicer becomes the primary
+      // action. It is named rather than hidden behind a generic "Open in
+      // Slicer", because the file is not going where the setting says.
       render(
         <ModelViewerModal
           libraryFileId={1}
@@ -676,15 +726,39 @@ describe('ModelViewerModal', () => {
         />
       );
 
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Open in Slicer' })).toBeEnabled();
-      });
+      const button = await screen.findByRole('button', { name: 'Open in OrcaSlicer' });
+      expect(button).toBeEnabled();
 
-      fireEvent.click(screen.getByRole('button', { name: 'More slicer options' }));
+      // OrcaSlicer is the only slicer that can take it, so there is no
+      // alternative to offer and the split collapses to a plain button.
+      expect(screen.queryByRole('button', { name: 'More slicer options' })).not.toBeInTheDocument();
 
+      fireEvent.click(button);
       await waitFor(() => {
-        expect(screen.getByText('Open in OrcaSlicer')).toBeInTheDocument();
+        expect(openInSlicer).toHaveBeenCalledWith(expect.any(String), 'orcaslicer');
       });
+    });
+
+    it('does not offer Bambu Studio a file its handler will refuse', async () => {
+      server.use(
+        http.get('/api/v1/settings/', () => {
+          return HttpResponse.json({ preferred_slicer: 'orcaslicer' });
+        })
+      );
+
+      render(
+        <ModelViewerModal
+          libraryFileId={1}
+          title="Model.stl"
+          fileType="stl"
+          onClose={mockOnClose}
+        />
+      );
+
+      // OrcaSlicer is preferred and takes an STL, so it is the plain primary.
+      await screen.findByRole('button', { name: 'Open in Slicer' });
+      expect(screen.queryByRole('button', { name: 'More slicer options' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Open in Bambu Studio')).not.toBeInTheDocument();
     });
 
     it('offers the split Slice button for an STL when the slicer API is enabled', async () => {
@@ -711,9 +785,11 @@ describe('ModelViewerModal', () => {
       fireEvent.click(screen.getByRole('button', { name: 'More slicer options' }));
 
       await waitFor(() => {
-        expect(screen.getByText('Open in Bambu Studio')).toBeInTheDocument();
         expect(screen.getByText('Open in OrcaSlicer')).toBeInTheDocument();
       });
+      // Bambu Studio is absent: the sidecar can slice an STL, but Bambu
+      // Studio's URL handler cannot load one (#3029).
+      expect(screen.queryByText('Open in Bambu Studio')).not.toBeInTheDocument();
     });
   });
 });

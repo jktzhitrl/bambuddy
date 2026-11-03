@@ -70,13 +70,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // Dark mode settings
   const [darkStyle, setDarkStyleState] = useState<ThemeStyle>(() => {
-    return (localStorage.getItem('dark-style') as ThemeStyle) || 'vibrant';
+    return (localStorage.getItem('dark-style') as ThemeStyle) || 'classic'; // Fork: B&E-Design
   });
   const [darkBackground, setDarkBackgroundState] = useState<DarkBackground>(() => {
-    return (localStorage.getItem('dark-background') as DarkBackground) || 'cool';
+    return (localStorage.getItem('dark-background') as DarkBackground) || 'neutral'; // Fork: B&E-Design
   });
   const [darkAccent, setDarkAccentState] = useState<ThemeAccent>(() => {
-    return (localStorage.getItem('dark-accent') as ThemeAccent) || 'green';
+    return (localStorage.getItem('dark-accent') as ThemeAccent) || 'orange'; // Fork: B&E-Design
   });
 
   // Light mode settings
@@ -87,7 +87,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return (localStorage.getItem('light-background') as LightBackground) || 'neutral';
   });
   const [lightAccent, setLightAccentState] = useState<ThemeAccent>(() => {
-    return (localStorage.getItem('light-accent') as ThemeAccent) || 'green';
+    return (localStorage.getItem('light-accent') as ThemeAccent) || 'orange'; // Fork: B&E-Design
   });
 
   // Client-only pref (localStorage), no api.updateSettings sync — the tab

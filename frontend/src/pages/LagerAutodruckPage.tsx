@@ -2,8 +2,9 @@
 // an das Werkstattlager. Texte bewusst direkt auf Deutsch statt ueber die
 // i18n-Dateien, damit Bambuddy-Updates ohne Konflikte uebernommen werden.
 import { useMemo, useState } from 'react';
+import type React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Loader2, Pencil, Play, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react';
+import { Check, CheckCheck, Loader2, MoreHorizontal, PackageCheck, Pencil, Play, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -25,22 +26,48 @@ const MODI: { wert: Modus; titel: string; text: string }[] = [
   { wert: 'aus', titel: 'Pausiert', text: 'Regel bleibt gespeichert, es wird nichts eingeplant.' },
 ];
 
-const JOB_TEXT: Record<string, { text: string; farbe: string }> = {
-  wartet_auf_freigabe: { text: 'Wartet auf Freigabe', farbe: 'text-yellow-400' },
-  geplant: { text: 'In der Warteschlange', farbe: 'text-blue-400' },
-  druckt: { text: 'Druckt', farbe: 'text-bambu-green' },
-  fertig: { text: 'Fertig', farbe: 'text-bambu-green' },
-  fehldruck: { text: 'Fehldruck', farbe: 'text-red-400' },
-  abgebrochen: { text: 'Abgebrochen', farbe: 'text-bambu-gray' },
-  startfehler: { text: 'Start fehlgeschlagen', farbe: 'text-amber-400' },
-  verworfen: { text: 'Verworfen', farbe: 'text-bambu-gray' },
+// Status und Dringlichkeit als ruhige Kästchen (Chips). Farben mit
+// hell/dunkel-Variante, damit sie auf beiden Hintergründen lesbar sind;
+// "fertig" ist bewusst grün und nicht die Akzentfarbe.
+const CHIP = 'inline-flex items-center h-6 px-2.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0';
+const TON: Record<string, string> = {
+  neutral: 'bg-bambu-dark-tertiary text-bambu-gray-light',
+  info: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+  gut: 'bg-green-500/15 text-green-700 dark:text-green-300',
+  warn: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  krit: 'bg-red-500/15 text-red-700 dark:text-red-300',
 };
 
-const DRINGLICHKEIT_FARBE: Record<string, string> = {
-  hoch: 'bg-red-500/20 text-red-300',
-  mittel: 'bg-yellow-500/20 text-yellow-300',
-  niedrig: 'bg-bambu-green/20 text-bambu-green',
+const JOB_TEXT: Record<string, { text: string; ton: keyof typeof TON }> = {
+  wartet_auf_freigabe: { text: 'Wartet auf Freigabe', ton: 'warn' },
+  geplant: { text: 'In der Warteschlange', ton: 'info' },
+  druckt: { text: 'Druckt', ton: 'info' },
+  fertig: { text: 'Fertig', ton: 'gut' },
+  fehldruck: { text: 'Fehldruck', ton: 'krit' },
+  abgebrochen: { text: 'Abgebrochen', ton: 'neutral' },
+  startfehler: { text: 'Start fehlgeschlagen', ton: 'krit' },
+  verworfen: { text: 'Verworfen', ton: 'neutral' },
 };
+
+const DRINGLICHKEIT_TON: Record<string, keyof typeof TON> = {
+  hoch: 'krit',
+  mittel: 'warn',
+  niedrig: 'neutral',
+};
+
+function Chip({ ton, children }: { ton: keyof typeof TON; children: React.ReactNode }) {
+  return <span className={`${CHIP} ${TON[ton]}`}>{children}</span>;
+}
+
+function DringlichkeitChip({ wert }: { wert: string | null | undefined }) {
+  if (!wert) return null;
+  return <Chip ton={DRINGLICHKEIT_TON[wert] ?? 'neutral'}>{wert}</Chip>;
+}
+
+function StatusChip({ status }: { status: string }) {
+  const st = JOB_TEXT[status] ?? { text: status, ton: 'neutral' as const };
+  return <Chip ton={st.ton}>{st.text}</Chip>;
+}
 
 function zeit(iso: string | null | undefined) {
   if (!iso) return '–';
@@ -144,12 +171,91 @@ export function LagerAutodruckPage() {
 }
 
 // --- Übersicht -------------------------------------------------------------------
+//
+// Aufbau nach Dringlichkeit (wie in der Lager-Software): Statuszeile,
+// vier Kennzahlen, "Wartet auf Freigabe" (je Druck ein Knopf, dazu
+// "Alle freigeben"), "Kann gepackt werden", dann Bestand und Verlauf.
+
+function Kennzahl({ titel, wert, unter, betont }: { titel: string; wert: number | string; unter?: string; betont?: boolean }) {
+  return (
+    <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-xl card-shadow p-4 flex flex-col gap-1 min-w-0">
+      <span className="text-sm text-bambu-gray">{titel}</span>
+      <span className={`text-3xl font-semibold leading-tight tabular-nums ${betont ? 'text-bambu-green' : 'text-white'}`}>{wert}</span>
+      {unter && <span className="text-sm text-bambu-gray truncate">{unter}</span>}
+    </div>
+  );
+}
+
+function Bereich({ titel, anzahl, aktion, unter, children }: {
+  titel: string; anzahl?: number; aktion?: React.ReactNode; unter?: string; children: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <div className="px-5 py-3.5 border-b border-bambu-dark-tertiary flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-white font-semibold flex items-center gap-2">
+            {titel}
+            {!!anzahl && <span className="text-sm font-normal text-bambu-gray tabular-nums">{anzahl}</span>}
+          </h2>
+          {unter && <p className="text-xs text-bambu-gray mt-0.5">{unter}</p>}
+        </div>
+        {aktion}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
+function Zeilen({ children }: { children: React.ReactNode }) {
+  return <div className="divide-y divide-bambu-dark-tertiary">{children}</div>;
+}
+
+function Leer({ children }: { children: React.ReactNode }) {
+  return <p className="px-5 py-4 text-sm text-bambu-gray">{children}</p>;
+}
+
+// Kleines "…"-Menü für seltene Aktionen (z. B. Verwerfen).
+function MehrMenue({ eintraege, label }: { eintraege: { text: string; onClick: () => void; gefaehrlich?: boolean; icon?: React.ReactNode }[]; label: string }) {
+  const [offen, setOffen] = useState(false);
+  return (
+    <div className="relative" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOffen(false); }}>
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        aria-expanded={offen}
+        onClick={() => setOffen(o => !o)}
+        className="w-9 h-9 min-h-[44px] md:min-h-0 inline-flex items-center justify-center rounded-lg border border-bambu-dark-tertiary text-bambu-gray-light hover:bg-bambu-dark-tertiary"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {offen && (
+        <div className="absolute right-0 top-[calc(100%+4px)] z-30 min-w-44 p-1 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary card-shadow">
+          {eintraege.map(e => (
+            <button
+              key={e.text}
+              type="button"
+              onClick={() => { setOffen(false); e.onClick(); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-left hover:bg-bambu-dark-tertiary ${e.gefaehrlich ? 'text-red-600 dark:text-red-400' : 'text-white'}`}
+            >
+              {e.icon}{e.text}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const VERLAUF_ANFANG = 8;
 
 function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission } = useAuth();
   const darfFreigeben = hasPermission('queue:update_all');
+  const [alleAnzeigen, setAlleAnzeigen] = useState(false);
+  const [freigabeLaeuft, setFreigabeLaeuft] = useState(false);
 
   const status = useQuery({ queryKey: ['lager-autodruck', 'status'], queryFn: lagerAutodruckApi.status, refetchInterval: 15000 });
   const jobs = useQuery({ queryKey: ['lager-autodruck', 'jobs'], queryFn: lagerAutodruckApi.jobs, refetchInterval: 15000 });
@@ -182,184 +288,250 @@ function Uebersicht({ darfAendern }: { darfAendern: boolean }) {
   });
 
   const s = status.data;
-  const wartend = (jobs.data ?? []).filter(j => j.status === 'wartet_auf_freigabe');
-  const uebrige = (jobs.data ?? []).filter(j => j.status !== 'wartet_auf_freigabe');
+  const alleJobs = jobs.data ?? [];
+  // Dringendste zuerst: hoch vor mittel vor niedrig, dann älteste zuerst.
+  const rang: Record<string, number> = { hoch: 0, mittel: 1, niedrig: 2 };
+  const wartend = alleJobs
+    .filter(j => j.status === 'wartet_auf_freigabe')
+    .sort((a, b) => (rang[a.dringlichkeit ?? ''] ?? 3) - (rang[b.dringlichkeit ?? ''] ?? 3)
+      || String(a.created_at).localeCompare(String(b.created_at)));
+  const uebrige = alleJobs.filter(j => j.status !== 'wartet_auf_freigabe');
+  const laufend = alleJobs.filter(j => j.status === 'druckt' || j.status === 'geplant');
+  const druckt = alleJobs.filter(j => j.status === 'druckt').length;
+  const sichtbar = alleAnzeigen ? uebrige : uebrige.slice(0, VERLAUF_ANFANG);
+
+  const verfuegbar = (z: NonNullable<typeof s>['uebersicht'][number]) =>
+    z.bestand === null ? null : z.bestand + z.in_arbeit - z.nachfrage;
+  const knapp = (z: NonNullable<typeof s>['uebersicht'][number]) => {
+    const v = verfuegbar(z);
+    return v !== null && z.mindestbestand !== null && v <= z.mindestbestand;
+  };
+  const bestand = [...(s?.uebersicht ?? [])].sort((a, b) =>
+    Number(knapp(b)) - Number(knapp(a)) || (a.name ?? '').localeCompare(b.name ?? ''));
+  const knappAnzahl = bestand.filter(knapp).length;
+
+  async function alleFreigeben() {
+    setFreigabeLaeuft(true);
+    let ok = 0;
+    for (const j of wartend) {
+      try { await lagerAutodruckApi.jobFreigeben(j.id); ok++; } catch (e) { showToast((e as Error).message, 'error'); break; }
+    }
+    setFreigabeLaeuft(false);
+    if (ok) showToast(`${ok} Druck${ok === 1 ? '' : 'e'} freigegeben`);
+    neuLaden();
+  }
+
+  const statusText = !s ? 'Lade …'
+    : !s.eingerichtet ? 'Noch nicht mit dem Lager verbunden'
+    : s.aktiv ? 'Autodruck ist eingeschaltet'
+    : 'Autodruck ist ausgeschaltet (Buchungen laufen weiter)';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card>
-        <CardContent className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
-          <div className="space-y-1 text-sm">
+        <div className="px-5 py-3.5 flex flex-col md:flex-row md:items-center gap-3 justify-between">
+          <div className="space-y-0.5 text-sm min-w-0">
             <div className="flex items-center gap-2">
-              <span className={`inline-block w-2.5 h-2.5 rounded-full ${s?.aktiv && s.eingerichtet ? 'bg-bambu-green' : 'bg-bambu-gray'}`} />
-              <span className="text-white font-medium">
-                {!s ? 'Lade …' : !s.eingerichtet ? 'Noch nicht mit dem Lager verbunden' : s.aktiv ? 'Autodruck ist eingeschaltet' : 'Autodruck ist ausgeschaltet (Buchungen laufen weiter)'}
-              </span>
+              <span className={`inline-block w-2.5 h-2.5 rounded-full ${s?.letzter_fehler ? 'bg-red-500' : s?.aktiv && s.eingerichtet ? 'bg-green-500' : 'bg-bambu-gray'}`} />
+              <span className="text-white font-medium">{statusText}</span>
             </div>
             {s && (
               <div className="text-bambu-gray">
-                Letzte Prüfung: {zeit(s.letzter_lauf)} · alle {s.intervall_minuten} Min.
+                Letzte Prüfung {zeit(s.letzter_lauf)} · alle {s.intervall_minuten} Min.
                 {' · '}Dringlichkeit {s.ki_aktiv ? 'per KI' : 'nach fester Regel'}
-                {s.offene_buchungen > 0 && <> · <span className="text-yellow-400">{s.offene_buchungen} Buchung(en) noch nicht im Lager</span></>}
+                {s.offene_buchungen > 0 && <> · <span className="text-amber-700 dark:text-amber-300 font-medium">{s.offene_buchungen} Buchung{s.offene_buchungen === 1 ? '' : 'en'} noch nicht im Lager</span></>}
               </div>
             )}
-            {s?.letzter_fehler && <div className="text-red-400">Fehler: {s.letzter_fehler}</div>}
+            {s?.letzter_fehler && <div className="text-red-600 dark:text-red-400">Fehler: {s.letzter_fehler}</div>}
           </div>
           {darfAendern && (
-            <Button onClick={() => pruefen.mutate()} disabled={pruefen.isPending || !s?.eingerichtet}>
+            <Button variant="secondary" onClick={() => pruefen.mutate()} disabled={pruefen.isPending || !s?.eingerichtet}>
               {pruefen.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               Jetzt prüfen
             </Button>
           )}
-        </CardContent>
+        </div>
       </Card>
 
-      {s?.eingerichtet && !s.aktiv && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-white font-semibold">Vorschau: das würde jetzt eingeplant</h2>
-            <p className="text-xs text-bambu-gray mt-1">
-              Der Autodruck ist aus – es wird nichts in die Warteschlange gestellt. So kannst du Regeln und Mindestbestände prüfen, bevor du ihn einschaltest.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {!s.vorschau.length && <p className="text-sm text-bambu-gray">Im Moment würde nichts gedruckt. („Jetzt prüfen“ rechnet neu.)</p>}
-            {s.vorschau.map(v => (
-              <div key={v.part_id} className="p-3 rounded-lg bg-bambu-dark text-sm space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-white font-medium">{v.druecke} Druck{v.druecke === 1 ? '' : 'e'} {v.name} ({v.stueck} Stück)</span>
-                  <span className={`px-2 py-0.5 rounded text-xs ${DRINGLICHKEIT_FARBE[v.dringlichkeit] ?? ''}`}>{v.dringlichkeit}</span>
-                  <span className={v.ohne_freigabe ? 'text-blue-400' : 'text-yellow-400'}>
-                    {v.ohne_freigabe ? 'würde automatisch starten' : 'würde auf Freigabe warten'}
-                  </span>
-                  {v.termin && <span className="text-bambu-gray">Versand bis {datum(v.termin)}</span>}
-                </div>
-                <div className="text-bambu-gray">{v.begruendung}</div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      {s?.eingerichtet && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Kennzahl titel="Wartet auf Freigabe" wert={wartend.length} betont={wartend.length > 0}
+            unter={wartend.length ? `${wartend.filter(j => j.dringlichkeit === 'hoch').length} davon dringend` : 'nichts freizugeben'} />
+          <Kennzahl titel="Läuft gerade" wert={laufend.length}
+            unter={laufend.length ? `${druckt} druckt · ${laufend.length - druckt} in der Warteschlange` : 'kein Nachdruck aktiv'} />
+          <Kennzahl titel="Unter Mindestbestand" wert={knappAnzahl}
+            unter={`von ${bestand.length} Teilen mit Regel`} />
+          <Kennzahl titel="Kann gepackt werden" wert={s.packbar?.length ?? 0}
+            unter={s.packbar?.length ? 'alles im Lager' : 'keine Bestellung komplett'} />
+        </div>
       )}
 
-      {!!s?.packbar?.length && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-white font-semibold">Kann gepackt werden</h2>
-            <p className="text-xs text-bambu-gray mt-1">
-              Für diese Bestellungen liegt alles im Lager – gerechnet wie beim Abschließen im Lager, frühester Versand zuerst.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {s.packbar.map(p => (
-              <pre key={p.order_id} className="p-3 rounded-lg bg-bambu-dark text-sm text-white whitespace-pre-wrap font-sans">
-                {p.text}
-              </pre>
-            ))}
-          </CardContent>
-        </Card>
+      {s?.eingerichtet && !s.aktiv && (
+        <Bereich titel="Vorschau: das würde jetzt eingeplant" anzahl={s.vorschau.length}
+          unter="Der Autodruck ist aus – es wird nichts in die Warteschlange gestellt. So kannst du Regeln und Mindestbestände prüfen.">
+          {!s.vorschau.length ? <Leer>Im Moment würde nichts gedruckt. („Jetzt prüfen“ rechnet neu.)</Leer> : (
+            <Zeilen>
+              {s.vorschau.map(v => (
+                <div key={v.part_id} className="px-5 py-3 text-sm space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-white font-medium">{v.druecke} Druck{v.druecke === 1 ? '' : 'e'} {v.name} ({v.stueck} Stück)</span>
+                    <DringlichkeitChip wert={v.dringlichkeit} />
+                    <Chip ton={v.ohne_freigabe ? 'info' : 'warn'}>{v.ohne_freigabe ? 'würde automatisch starten' : 'würde auf Freigabe warten'}</Chip>
+                    {v.termin && <span className="text-bambu-gray">Versand bis {datum(v.termin)}</span>}
+                  </div>
+                  <div className="text-bambu-gray">{v.begruendung}</div>
+                </div>
+              ))}
+            </Zeilen>
+          )}
+        </Bereich>
       )}
 
       {wartend.length > 0 && (
-        <Card>
-          <CardHeader><h2 className="text-white font-semibold">Wartet auf deine Freigabe ({wartend.length})</h2></CardHeader>
-          <CardContent className="space-y-3">
+        <Bereich
+          titel="Wartet auf deine Freigabe"
+          anzahl={wartend.length}
+          unter="Dringendste zuerst."
+          aktion={darfFreigeben && wartend.length > 1 && (
+            <Button size="sm" variant="secondary" onClick={alleFreigeben} disabled={freigabeLaeuft || freigeben.isPending}>
+              {freigabeLaeuft ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCheck className="w-4 h-4" />}
+              Alle {wartend.length} freigeben
+            </Button>
+          )}
+        >
+          <Zeilen>
             {wartend.map(j => (
-              <div key={j.id} className="flex flex-col md:flex-row md:items-center gap-3 justify-between p-3 rounded-lg bg-bambu-dark">
-                <JobBeschreibung job={j} />
+              <div key={j.id} className="px-5 py-3 flex flex-col md:flex-row md:items-center gap-3 justify-between">
+                <JobBeschreibung job={j} ohneStatus />
                 {darfFreigeben && (
-                  <div className="flex gap-2 shrink-0">
-                    <Button size="sm" onClick={() => freigeben.mutate(j.id)} disabled={freigeben.isPending}>
+                  <div className="flex gap-2 shrink-0 self-end md:self-auto">
+                    <Button size="sm" onClick={() => freigeben.mutate(j.id)} disabled={freigeben.isPending || freigabeLaeuft} className="min-w-32">
                       <Play className="w-4 h-4" /> Freigeben
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => verwerfen.mutate(j.id)} disabled={verwerfen.isPending}>
-                      <X className="w-4 h-4" /> Verwerfen
-                    </Button>
+                    <MehrMenue label={`Weitere Aktionen für ${j.part_name ?? 'Druck'}`} eintraege={[
+                      { text: 'Verwerfen', gefaehrlich: true, icon: <X className="w-4 h-4" />, onClick: () => verwerfen.mutate(j.id) },
+                    ]} />
                   </div>
                 )}
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </Zeilen>
+        </Bereich>
       )}
 
-      <Card>
-        <CardHeader><h2 className="text-white font-semibold">Bestand der Teile mit Regel</h2></CardHeader>
-        <CardContent className="overflow-x-auto">
-          {!s?.uebersicht.length ? (
-            <p className="text-sm text-bambu-gray">
-              Noch keine Daten - lege unter „Regeln je Teil“ fest, welche Teile automatisch nachgedruckt werden, und klicke „Jetzt prüfen“.
-            </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-bambu-gray text-left">
+      {!!s?.packbar?.length && (
+        <Bereich titel="Kann gepackt werden" anzahl={s.packbar.length}
+          unter="Für diese Bestellungen liegt alles im Lager – frühester Versand zuerst.">
+          <Zeilen>
+            {s.packbar.map(p => (
+              <div key={p.order_id} className="px-5 py-3 text-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <PackageCheck className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="text-white font-medium">{p.kunde}</span>
+                  {p.versand_bis && <span className="text-bambu-gray">Versand bis {datum(p.versand_bis)}</span>}
+                </div>
+                <pre className="mt-1 ml-6 text-bambu-gray whitespace-pre-wrap font-sans">{p.text.split('\n').slice(1).join('\n') || p.text}</pre>
+              </div>
+            ))}
+          </Zeilen>
+        </Bereich>
+      )}
+
+      <Bereich titel="Bestand der Teile mit Regel" anzahl={bestand.length} unter={bestand.length ? 'Knappe Teile zuerst. Verfügbar = Bestand + in Arbeit − offene Aufträge.' : undefined}>
+        {!bestand.length ? (
+          <Leer>Noch keine Daten – lege unter „Regeln je Teil“ fest, welche Teile automatisch nachgedruckt werden, und klicke „Jetzt prüfen“.</Leer>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead className="text-bambu-gray text-left text-xs uppercase tracking-wide">
                 <tr>
-                  <th className="py-2 pr-4">Teil</th>
-                  <th className="py-2 pr-4 text-right">Bestand</th>
-                  <th className="py-2 pr-4 text-right">Mindest</th>
-                  <th className="py-2 pr-4 text-right">In Arbeit</th>
-                  <th className="py-2 pr-4 text-right">Offene Aufträge</th>
-                  <th className="py-2 pr-4">Versand bis</th>
-                  <th className="py-2">Hinweis</th>
+                  <th className="py-2.5 pl-5 pr-4 font-medium">Teil</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Bestand</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">In Arbeit</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Aufträge</th>
+                  <th className="py-2.5 pr-4 font-medium text-right">Verfügbar / Mindest</th>
+                  <th className="py-2.5 pr-5 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {s.uebersicht.map(z => {
-                  const knapp = z.bestand !== null && z.mindestbestand !== null && z.bestand + z.in_arbeit - z.nachfrage <= z.mindestbestand;
+                {bestand.map(z => {
+                  const v = verfuegbar(z);
+                  const istKnapp = knapp(z);
                   return (
                     <tr key={z.regel_id} className="border-t border-bambu-dark-tertiary">
-                      <td className="py-2 pr-4 text-white">{z.name ?? z.part_id}</td>
-                      <td className={`py-2 pr-4 text-right ${knapp ? 'text-yellow-400' : 'text-white'}`}>
-                        {zahl(z.bestand)}
-                        {z.gesperrt > 0 && <span className="text-bambu-gray" title="In gesperrten Lagerorten – zählt nicht als verfügbar"> (+{zahl(z.gesperrt)} 🔒)</span>}
+                      <td className="py-2.5 pl-5 pr-4">
+                        <div className="text-white font-medium">{z.name ?? z.part_id}</div>
+                        {(z.hinweis || z.termin) && (
+                          <div className="text-xs text-bambu-gray">{[z.hinweis, z.termin && `Versand bis ${datum(z.termin)}`].filter(Boolean).join(' · ')}</div>
+                        )}
                       </td>
-                      <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.mindestbestand)}</td>
-                      <td className="py-2 pr-4 text-right text-blue-400">{zahl(z.in_arbeit)}</td>
-                      <td className="py-2 pr-4 text-right text-bambu-gray">{zahl(z.nachfrage)}</td>
-                      <td className="py-2 pr-4 text-bambu-gray">{datum(z.termin)}</td>
-                      <td className="py-2 text-bambu-gray">{z.hinweis ?? ''}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums text-white">
+                        {zahl(z.bestand)}
+                        {z.gesperrt > 0 && <span className="text-bambu-gray" title="In gesperrten Lagerorten – zählt nicht als verfügbar"> (+{zahl(z.gesperrt)} gesperrt)</span>}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums text-bambu-gray">{z.in_arbeit ? `+${zahl(z.in_arbeit)}` : '–'}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums text-bambu-gray">{z.nachfrage ? `−${zahl(z.nachfrage)}` : '–'}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">
+                        <span className={`font-semibold ${istKnapp ? 'text-bambu-green' : 'text-white'}`}>{zahl(v)}</span>
+                        <span className="text-bambu-gray"> / {zahl(z.mindestbestand)}</span>
+                      </td>
+                      <td className="py-2.5 pr-5">
+                        {istKnapp
+                          ? <Chip ton={z.in_arbeit > 0 ? 'info' : 'warn'}>{z.in_arbeit > 0 ? 'wird nachgedruckt' : 'knapp'}</Chip>
+                          : <Chip ton="neutral">ok</Chip>}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </Bereich>
 
-      <Card>
-        <CardHeader><h2 className="text-white font-semibold">Letzte Druckaufträge</h2></CardHeader>
-        <CardContent className="space-y-2">
-          {!uebrige.length && <p className="text-sm text-bambu-gray">Noch keine Druckaufträge angelegt.</p>}
-          {uebrige.slice(0, 30).map(j => (
-            <div key={j.id} className="p-3 rounded-lg bg-bambu-dark"><JobBeschreibung job={j} /></div>
-          ))}
-        </CardContent>
-      </Card>
+      <Bereich titel="Letzte Druckaufträge" anzahl={uebrige.length}>
+        {!uebrige.length ? <Leer>Noch keine Druckaufträge angelegt.</Leer> : (
+          <>
+            <Zeilen>
+              {sichtbar.map(j => (
+                <div key={j.id} className="px-5 py-3"><JobBeschreibung job={j} /></div>
+              ))}
+            </Zeilen>
+            {uebrige.length > VERLAUF_ANFANG && (
+              <button
+                type="button"
+                onClick={() => setAlleAnzeigen(a => !a)}
+                className="w-full py-3 border-t border-bambu-dark-tertiary text-sm font-medium text-bambu-green hover:bg-bambu-dark"
+              >
+                {alleAnzeigen ? 'Weniger anzeigen' : `Alle ${uebrige.length} anzeigen`}
+              </button>
+            )}
+          </>
+        )}
+      </Bereich>
     </div>
   );
 }
 
-function JobBeschreibung({ job }: { job: Job }) {
-  const st = JOB_TEXT[job.status] ?? { text: job.status, farbe: 'text-white' };
+function JobBeschreibung({ job, ohneStatus }: { job: Job; ohneStatus?: boolean }) {
+  const meta = [
+    `angelegt ${zeit(job.created_at)}`,
+    job.freigegeben_von && `freigegeben von ${job.freigegeben_von}`,
+    job.finished_at && `beendet ${zeit(job.finished_at)}`,
+    job.druckdauer_s ? `Druckdauer ${dauer(job.druckdauer_s)}` : null,
+    job.queue_item_id && `Warteschlange #${job.queue_item_id}`,
+  ].filter(Boolean).join(' · ');
   return (
-    <div className="text-sm space-y-1 min-w-0">
+    <div className="text-sm min-w-0 flex-1">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-white font-medium">{job.stueck}× {job.part_name ?? job.part_id}</span>
-        {job.dringlichkeit && (
-          <span className={`px-2 py-0.5 rounded text-xs ${DRINGLICHKEIT_FARBE[job.dringlichkeit] ?? ''}`}>{job.dringlichkeit}</span>
-        )}
-        <span className={st.farbe}>{st.text}</span>
+        {!ohneStatus && <StatusChip status={job.status} />}
+        <DringlichkeitChip wert={job.dringlichkeit} />
       </div>
-      {job.begruendung && <div className="text-bambu-gray">{job.begruendung}</div>}
-      <div className="text-xs text-bambu-gray">
-        Angelegt {zeit(job.created_at)}
-        {job.freigegeben_von && <> · freigegeben von {job.freigegeben_von}</>}
-        {job.finished_at && <> · beendet {zeit(job.finished_at)}</>}
-        {job.queue_item_id && <> · Warteschlange #{job.queue_item_id}</>}
-        {job.druckdauer_s ? <> · Druckdauer {dauer(job.druckdauer_s)}</> : null}
-      </div>
+      {job.begruendung && <div className="text-bambu-gray mt-0.5">{job.begruendung}</div>}
+      <div className="text-xs text-bambu-gray mt-0.5">{meta}</div>
       {job.geplanter_start && new Date(job.geplanter_start) > new Date() && ['geplant', 'wartet_auf_freigabe'].includes(job.status) && (
-        <div className="text-xs text-blue-300">
+        <div className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
           Druckende optimiert: startet {zeit(job.geplanter_start)}, damit er nicht in der Nacht fertig wird
         </div>
       )}
@@ -717,14 +889,14 @@ function Buchungen({ darfAendern }: { darfAendern: boolean }) {
                   <td className="py-2 pr-4 text-bambu-gray whitespace-nowrap">{zeit(b.created_at)}</td>
                   <td className="py-2 pr-4 text-white">{b.drucker}</td>
                   <td className="py-2 pr-4 text-white">{b.dateiname}</td>
-                  <td className={`py-2 pr-4 ${b.status === 'fertig' ? 'text-bambu-green' : 'text-red-400'}`}>
+                  <td className={`py-2 pr-4 ${b.status === 'fertig' ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                     {b.status === 'fertig' ? 'Fertig' : 'Fehldruck'}{b.gramm ? ` · ${Math.round(b.gramm)} g` : ''}
                   </td>
                   <td className="py-2 pr-4">
                     {b.zustand === 'gesendet' ? (
-                      <span className={BUCHUNG_OK.includes(b.ergebnis ?? '') ? 'text-bambu-green' : 'text-yellow-400'}>{b.ergebnis}</span>
+                      <span className={BUCHUNG_OK.includes(b.ergebnis ?? '') ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-300'}>{b.ergebnis}</span>
                     ) : (
-                      <span className="text-yellow-400" title={b.fehler ?? ''}>
+                      <span className="text-amber-700 dark:text-amber-300" title={b.fehler ?? ''}>
                         {b.zustand === 'offen' ? 'wird gesendet' : `Fehler (${b.versuche} Versuche)`}
                       </span>
                     )}
@@ -959,7 +1131,7 @@ function Benachrichtigungen({ k, setze, darfAendern }: {
             </label>
           ))}
           {k.melden.includes('platte') && daten.data && !daten.data.platte_bestaetigen && (
-            <div className="text-xs text-yellow-400">
+            <div className="text-xs text-amber-700 dark:text-amber-300">
               „Platte abräumen“ kommt nur, wenn in Bambuddy unter Einstellungen → Workflow → Warteschlange
               „Druckplatte-Bestätigung erforderlich“ eingeschaltet ist. Sonst startet der nächste Druck ohne Nachfrage.
             </div>

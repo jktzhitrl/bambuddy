@@ -35,7 +35,7 @@ from backend.app.models.notification import NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
-from backend.app.services.lager_autodruck import konfig, melden, nachtruhe
+from backend.app.services.lager_autodruck import filament, konfig, melden, nachtruhe
 from backend.app.services.lager_autodruck.service import (
     FreigabeFehler,
     bibliothek_druckbar,
@@ -469,6 +469,70 @@ async def status_lesen(
         "offene_buchungen": offene_buchungen,
         "packbar": s.packbar,
     }
+
+
+# --- Filament ans Lager --------------------------------------------------------
+
+
+class FilamentDaten(BaseModel):
+    aktiv: bool = False
+    zuordnung: dict[str, str] = Field(default_factory=dict)
+
+
+async def _filament_antwort(db: AsyncSession) -> dict:
+    k = await konfig.laden(db)
+    fk = await filament.laden(db)
+    materialien: list[dict] = []
+    lager_fehler = None
+    if k.eingerichtet:
+        try:
+            materialien = await lager_autodruck_service.lager_client(k).lade_materialien()
+        except LagerFehler as e:
+            lager_fehler = str(e)
+    else:
+        lager_fehler = "Verbindung zum Lager ist noch nicht eingerichtet."
+    s = lager_autodruck_service
+    return {
+        "aktiv": fk.aktiv,
+        "zuordnung": fk.zuordnung,
+        "sorten": filament.sorten(await filament.aktive_spulen(db)),
+        "materialien": materialien,
+        "lager_fehler": lager_fehler,
+        "letzter_abgleich": _iso(s.filament_abgleich),
+        "fehler": s.filament_fehler,
+    }
+
+
+@router.get("/filament")
+async def filament_lesen(
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
+):
+    return await _filament_antwort(db)
+
+
+@router.put("/filament")
+async def filament_speichern(
+    daten: FilamentDaten,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_UPDATE),
+):
+    alt = await filament.laden(db)
+    zuordnung = {s.strip(): m.strip() for s, m in daten.zuordnung.items() if s.strip() and m.strip()}
+    if daten.aktiv and not zuordnung:
+        raise HTTPException(400, "Erst mindestens eine Sorte einem Lager-Material zuordnen.")
+    if alt.aktiv and not daten.aktiv:
+        # Ausschalten: das Lager muss wieder selbst abbuchen, sonst fehlt der Verbrauch.
+        try:
+            await lager_autodruck_service.lager_client(await konfig.laden(db)).filament_abgleich_aus()
+        except LagerFehler as e:
+            raise HTTPException(502, f"Lager nicht umgestellt, bitte erneut versuchen: {e}") from e
+    await filament.speichern(db, filament.FilamentKonfig(aktiv=daten.aktiv, zuordnung=zuordnung))
+    k = await konfig.laden(db)
+    if daten.aktiv and k.eingerichtet:
+        # Gleich abgleichen, damit das Lager sofort umgestellt ist.
+        await lager_autodruck_service.filament_abgleichen(db, lager_autodruck_service.lager_client(k))
+    return await _filament_antwort(db)
 
 
 @router.post("/pruefen")

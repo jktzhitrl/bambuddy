@@ -1440,3 +1440,116 @@ async def test_geloeschte_datei_plant_nichts(umgebung):
         )
         await db.commit()
     assert (await service.durchlauf())["angelegt"] == 0
+
+
+# --- Filament ans Lager ----------------------------------------------------------
+
+from backend.app.models.spool import Spool  # noqa: E402
+from backend.app.services.lager_autodruck import filament  # noqa: E402
+
+
+def _spule(material="PLA", subtype="Basic", brand="Bambu Lab", color="Schwarz", gewicht=1000, verbraucht=0.0, **kw):
+    return Spool(
+        material=material,
+        subtype=subtype,
+        brand=brand,
+        color_name=color,
+        label_weight=gewicht,
+        weight_used=verbraucht,
+        **kw,
+    )
+
+
+def test_filament_sorte_ignoriert_gross_klein_und_leerzeichen():
+    assert filament.sorte_schluessel("PLA", "Basic", "Bambu  Lab", "Schwarz") == filament.sorte_schluessel(
+        "pla ", "basic", "bambu lab", " SCHWARZ"
+    )
+    assert filament.sorte_schluessel("PLA", None, None, "Weiß") == filament.sorte_schluessel("pla", "", "", "WEISS")
+
+
+def test_filament_summen_je_lager_material():
+    spulen = [
+        _spule(verbraucht=250),
+        _spule(verbraucht=1200),  # mehr verbraucht als Nenngewicht zaehlt als leer
+        _spule(brand="Sunlu", gewicht=1000, verbraucht=100),
+        _spule(color="Weiß", verbraucht=0),
+    ]
+    schwarz_bambu = filament.sorte_schluessel("PLA", "Basic", "Bambu Lab", "Schwarz")
+    schwarz_sunlu = filament.sorte_schluessel("PLA", "Basic", "Sunlu", "Schwarz")
+    leer = filament.sorte_schluessel("PETG", "", "", "Rot")
+    summen = filament.summen(spulen, {schwarz_bambu: "pla-s", schwarz_sunlu: "pla-s", leer: "petg"})
+    # Zwei Hersteller auf dasselbe Lager-Material, Weiss ist nicht zugeordnet,
+    # PETG hat keine Spule mehr und geht mit 0 ans Lager.
+    assert summen == {"pla-s": 750 + 0 + 900, "petg": 0.0}
+
+
+def test_filament_sorten_fuer_die_zuordnung():
+    sorten = filament.sorten([_spule(verbraucht=300), _spule(verbraucht=100), _spule(color="Weiß")])
+    assert [(s["color_name"], s["spulen"], s["rest_g"]) for s in sorten] == [
+        ("Schwarz", 2, 1600.0),
+        ("Weiß", 1, 1000.0),
+    ]
+
+
+async def test_filament_konfig_speichern_und_laden(db_session):
+    assert (await filament.laden(db_session)).aktiv is False
+    await filament.speichern(db_session, filament.FilamentKonfig(aktiv=True, zuordnung={"pla|||schwarz": "m1"}))
+    geladen = await filament.laden(db_session)
+    assert geladen.aktiv is True
+    assert geladen.zuordnung == {"pla|||schwarz": "m1"}
+
+
+async def test_lager_client_filament_abgleich():
+    gesendet = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/auth/v1/token":
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        if request.url.path == "/rest/v1/rpc/filament_abgleich":
+            import json as _json
+
+            gesendet.update(_json.loads(request.content))
+            return httpx.Response(200, json=1)
+        return httpx.Response(404)
+
+    client = LagerClient("https://lager.example", "anon", "drucker@x", "geheim")
+    client.transport = httpx.MockTransport(handler)
+    assert await client.filament_abgleich({"b": 0.0, "a": 812.4}) == 1
+    assert gesendet == {"p_sorten": [{"id": "a", "gramm": 812.4}, {"id": "b", "gramm": 0.0}]}
+
+
+async def test_filament_abgleichen_nur_wenn_an(db_session):
+    class Lager:
+        def __init__(self):
+            self.aufrufe = []
+
+        async def filament_abgleich(self, gramm):
+            self.aufrufe.append(gramm)
+            return len(gramm)
+
+    db_session.add(_spule(verbraucht=400))
+    await db_session.commit()
+    s = LagerAutodruckService()
+    lager = Lager()
+    schluessel = filament.sorte_schluessel("PLA", "Basic", "Bambu Lab", "Schwarz")
+
+    await filament.speichern(db_session, filament.FilamentKonfig(aktiv=False, zuordnung={schluessel: "m1"}))
+    await s.filament_abgleichen(db_session, lager)
+    assert lager.aufrufe == []
+
+    await filament.speichern(db_session, filament.FilamentKonfig(aktiv=True, zuordnung={schluessel: "m1"}))
+    await s.filament_abgleichen(db_session, lager)
+    assert lager.aufrufe == [{"m1": 600.0}]
+    assert s.filament_abgleich is not None and s.filament_fehler is None
+
+
+async def test_filament_abgleich_fehler_haelt_nicht_auf(db_session):
+    class Lager:
+        async def filament_abgleich(self, gramm):
+            raise LagerFehler("Lager antwortete 404 auf /rest/v1/rpc/filament_abgleich")
+
+    schluessel = filament.sorte_schluessel("PLA", "", "", "Schwarz")
+    await filament.speichern(db_session, filament.FilamentKonfig(aktiv=True, zuordnung={schluessel: "m1"}))
+    s = LagerAutodruckService()
+    await s.filament_abgleichen(db_session, Lager())
+    assert "404" in s.filament_fehler

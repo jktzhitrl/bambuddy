@@ -177,3 +177,29 @@ async def test_regel_mit_datei_aus_dem_dateimanager(async_client, db_session):
         f"{BASIS}/regeln", json={"part_id": "c", "library_file_id": gesliced.id, "archive_id": archiv.id}
     )
     assert beides.status_code == 400
+
+
+async def test_filament_zuordnung_ohne_lagerverbindung(async_client, db_session):
+    from backend.app.models.spool import Spool
+
+    db_session.add(
+        Spool(material="PLA", subtype="Basic", brand="Sunlu", color_name="Weiß", label_weight=1000, weight_used=250)
+    )
+    await db_session.commit()
+
+    daten = (await async_client.get(f"{BASIS}/filament")).json()
+    assert daten["aktiv"] is False and daten["materialien"] == []
+    assert "nicht eingerichtet" in daten["lager_fehler"]
+    assert [(s["brand"], s["spulen"], s["rest_g"]) for s in daten["sorten"]] == [("Sunlu", 1, 750.0)]
+
+    # Einschalten ohne Zuordnung geht nicht.
+    antwort = await async_client.put(f"{BASIS}/filament", json={"aktiv": True, "zuordnung": {}})
+    assert antwort.status_code == 400
+
+    schluessel = daten["sorten"][0]["schluessel"]
+    antwort = await async_client.put(
+        f"{BASIS}/filament", json={"aktiv": True, "zuordnung": {schluessel: "m1", "x": " "}}
+    )
+    assert antwort.status_code == 200
+    assert antwort.json()["aktiv"] is True
+    assert antwort.json()["zuordnung"] == {schluessel: "m1"}

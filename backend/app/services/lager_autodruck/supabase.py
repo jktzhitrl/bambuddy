@@ -187,6 +187,26 @@ class LagerClient:
             {"select": "id,name,bestand,mindestbestand", "geloescht_am": "is.null", "order": "name"},
         )
 
+    async def lade_materialien(self) -> list[dict]:
+        return await self.lesen(
+            "materials",
+            {"select": "id,name,typ,farbe,hersteller,menge,mindestbestand", "geloescht_am": "is.null", "order": "name"},
+        )
+
+    async def filament_abgleich(self, gramm_je_material: dict[str, float]) -> int:
+        """Setzt im Lager den Bestand der genannten Materialien auf das Restgewicht
+        der Bambuddy-Spulen und schaltet dort das eigene Abbuchen ab.
+        Gibt zurueck, wie viele Materialien sich geaendert haben."""
+        ergebnis = await self.rpc(
+            "filament_abgleich",
+            {"p_sorten": [{"id": i, "gramm": g} for i, g in sorted(gramm_je_material.items())]},
+        )
+        return int(ergebnis or 0)
+
+    async def filament_abgleich_aus(self) -> None:
+        """Lager zieht wieder selbst Material ab (Bambuddy fuehrt nicht mehr)."""
+        await self.rpc("filament_abgleich_aus", {})
+
     async def druck_verbuchen(
         self, *, drucker: str, dateiname: str, zeitstempel: str, gramm: float | None, status: str
     ) -> str:

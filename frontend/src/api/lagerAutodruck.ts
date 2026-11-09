@@ -167,6 +167,37 @@ export interface DruckerAuswahl {
   standort: string | null;
 }
 
+export interface FilamentSorte {
+  schluessel: string;
+  material: string;
+  subtype: string;
+  brand: string;
+  color_name: string;
+  rgba: string | null;
+  spulen: number;
+  rest_g: number;
+}
+
+export interface LagerMaterial {
+  id: string;
+  name: string;
+  typ: string | null;
+  farbe: string | null;
+  hersteller: string | null;
+  menge: number | null;
+  mindestbestand: number | null;
+}
+
+export interface Filament {
+  aktiv: boolean;
+  zuordnung: Record<string, string>;
+  sorten: FilamentSorte[];
+  materialien: LagerMaterial[];
+  lager_fehler: string | null;
+  letzter_abgleich: string | null;
+  fehler: string | null;
+}
+
 const json = (daten: unknown) => JSON.stringify(daten);
 
 export const lagerAutodruckApi = {
@@ -192,4 +223,7 @@ export const lagerAutodruckApi = {
   jobVerwerfen: (id: number) => anfrage<{ ok: boolean }>(`/jobs/${id}/verwerfen`, { method: 'POST' }),
   buchungen: () => anfrage<Buchung[]>('/buchungen'),
   buchungErneut: (id: number) => anfrage<{ ok: boolean }>(`/buchungen/${id}/erneut`, { method: 'POST' }),
+  filament: () => anfrage<Filament>('/filament'),
+  filamentSpeichern: (d: { aktiv: boolean; zuordnung: Record<string, string> }) =>
+    anfrage<Filament>('/filament', { method: 'PUT', body: json(d) }),
 };

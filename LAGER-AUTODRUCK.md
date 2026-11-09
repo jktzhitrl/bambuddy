@@ -135,6 +135,18 @@ Ein Durchlauf läuft alle *N* Minuten oder per Knopf „Jetzt prüfen“:
   geschickt, die Meldung kommt zur „Fertig frühestens“-Zeit. Die Übersicht
   zeigt die Liste unter „Kann gepackt werden“. Bambuddy liest dafür nur und
   ändert am Auftrag nichts.
+- **Filament ans Lager** (Reiter „Filament“): Die Druckübersicht führt den
+  Filamentbestand. Rollen werden hier im Inventar angelegt, ins AMS
+  zugeordnet, gewogen und korrigiert; der echte Verbrauch je Druck wird an der
+  Spule abgezogen. Jede Sorte im Inventar (Material, Typ, Hersteller, Farbe)
+  wird einmal einem Material im Lager zugeordnet, mehrere Sorten dürfen zum
+  selben Lager-Material gehören. Ist der Schalter an, schickt Bambuddy bei
+  jeder Prüfung die Summe der Restgewichte aller aktiven Spulen je
+  Lager-Material ans Lager (`filament_abgleich`). Das Lager zieht dann bei
+  Drucken und beim Produzieren selbst kein Material mehr ab und zeigt die
+  Mengen nur noch an. Ausschalten stellt das Lager zurück
+  (`filament_abgleich_aus`). Voraussetzung im Lager:
+  `supabase-filament-aus-druckuebersicht.sql` ausgeführt.
 - **Sicherung**: Meldet das Lager auf eine Buchung „unbekannt“ (die
   Druck-Zuordnung fehlt), hält die Regel an, damit nicht endlos nachgedruckt
   wird. Freigeben: Zuordnung im Lager prüfen, dann die Regel in Bambuddy einmal

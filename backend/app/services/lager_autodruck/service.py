@@ -52,7 +52,7 @@ from backend.app.models.lager_autodruck import (
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lager_autodruck import bedarf, ki, konfig, melden, nachtruhe, packliste, telegram
+from backend.app.services.lager_autodruck import bedarf, filament, ki, konfig, melden, nachtruhe, packliste, telegram
 from backend.app.services.lager_autodruck.supabase import LagerClient, LagerFehler
 from backend.app.utils.local_time import local_day_start, local_zone, utcnow_naive
 
@@ -160,6 +160,9 @@ class LagerAutodruckService:
         self.telegram = telegram.Rueckkanal(self.knopf_ausfuehren)
         # Bestellungen, die gerade komplett gepackt werden koennen (fuer die Oberflaeche).
         self.packbar: list[dict] = []
+        # Filament ans Lager: letzter Abgleich und ggf. Fehler (fuer die Oberflaeche).
+        self.filament_abgleich: datetime | None = None
+        self.filament_fehler: str | None = None
 
     # --- Lebenszyklus -----------------------------------------------------
 
@@ -228,6 +231,7 @@ class LagerAutodruckService:
                 await self.jobs_abgleichen(db)
                 await self.nachtruhe_anwenden(db, k)
                 gesendet = await self.buchungen_senden(db, lager, k)
+                await self.filament_abgleichen(db, lager)
 
                 # Autodruck aus = Vorschau: gleiche Rechnung, aber nichts anlegen.
                 try:
@@ -247,6 +251,28 @@ class LagerAutodruckService:
             self.letzter_fehler = None
             self.letztes_ergebnis = ergebnis
             return ergebnis
+
+    async def filament_abgleichen(self, db: AsyncSession, lager: LagerClient) -> None:
+        """Restgewicht der Spulen je Lager-Material ans Lager schicken.
+
+        Laeuft nach den Druckbuchungen, damit der Verbrauch des letzten Drucks
+        schon in weight_used steckt. Ein Fehler hier haelt den Autodruck nicht auf.
+        """
+        fk = await filament.laden(db)
+        if not fk.aktiv or not fk.zuordnung:
+            self.filament_fehler = None
+            return
+        gramm = filament.summen(await filament.aktive_spulen(db), fk.zuordnung)
+        try:
+            geaendert = await lager.filament_abgleich(gramm)
+        except LagerFehler as e:
+            logger.warning("Lager-Filament: Abgleich fehlgeschlagen: %s", e)
+            self.filament_fehler = str(e)
+            return
+        if geaendert:
+            logger.info("Lager-Filament: %d Material(ien) im Lager aktualisiert", geaendert)
+        self.filament_abgleich = utcnow_naive()
+        self.filament_fehler = None
 
     async def _planen(self, db: AsyncSession, k: konfig.Konfig, lager: LagerClient, *, vorschau: bool = False) -> dict:
         """Bedarf rechnen und fehlende Drucke einplanen.

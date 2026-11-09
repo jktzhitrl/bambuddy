@@ -11,9 +11,9 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { lagerAutodruckApi } from '../api/lagerAutodruck';
-import type { Job, Konfig, Modus, Regel } from '../api/lagerAutodruck';
+import type { Filament as FilamentDaten, Job, Konfig, Modus, Regel } from '../api/lagerAutodruck';
 
-type Reiter = 'uebersicht' | 'regeln' | 'buchungen' | 'einstellungen';
+type Reiter = 'uebersicht' | 'regeln' | 'buchungen' | 'filament' | 'einstellungen';
 
 const EINGABE =
   'w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none';
@@ -109,6 +109,7 @@ export function LagerAutodruckPage() {
     { id: 'uebersicht', titel: 'Übersicht' },
     { id: 'regeln', titel: 'Regeln je Teil' },
     { id: 'buchungen', titel: 'Buchungen' },
+    { id: 'filament', titel: 'Filament' },
     { id: 'einstellungen', titel: 'Einstellungen' },
   ];
 
@@ -138,6 +139,7 @@ export function LagerAutodruckPage() {
       {reiter === 'uebersicht' && <Uebersicht darfAendern={darfAendern} />}
       {reiter === 'regeln' && <Regeln darfAendern={darfAendern} />}
       {reiter === 'buchungen' && <Buchungen darfAendern={darfAendern} />}
+      {reiter === 'filament' && <Filament darfAendern={darfAendern} />}
       {reiter === 'einstellungen' && <Einstellungen darfAendern={darfAendern} />}
     </div>
   );
@@ -743,6 +745,204 @@ function Buchungen({ darfAendern }: { darfAendern: boolean }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// --- Filament ans Lager ----------------------------------------------------------
+
+function gramm(g: number | null | undefined) {
+  if (g == null) return '–';
+  return g >= 1000
+    ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 2 })} kg`
+    : `${Math.round(g).toLocaleString('de-DE')} g`;
+}
+
+function Filament({ darfAendern }: { darfAendern: boolean }) {
+  const daten = useQuery({ queryKey: ['lager-autodruck', 'filament'], queryFn: lagerAutodruckApi.filament });
+  if (daten.error) return <p className="text-sm text-red-400">{(daten.error as Error).message}</p>;
+  if (!daten.data) return <Loader2 className="w-5 h-5 animate-spin text-bambu-gray" />;
+  return <FilamentFormular start={daten.data} darfAendern={darfAendern} />;
+}
+
+function FilamentFormular({ start, darfAendern }: { start: FilamentDaten; darfAendern: boolean }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [stand, setStand] = useState<FilamentDaten>(start);
+  const [aktiv, setAktiv] = useState(start.aktiv);
+  const [zuordnung, setZuordnung] = useState<Record<string, string>>(start.zuordnung);
+
+  const speichern = useMutation({
+    mutationFn: () => lagerAutodruckApi.filamentSpeichern({ aktiv, zuordnung }),
+    onSuccess: neu => {
+      setStand(neu);
+      setAktiv(neu.aktiv);
+      setZuordnung(neu.zuordnung);
+      queryClient.setQueryData(['lager-autodruck', 'filament'], neu);
+      showToast(neu.aktiv ? 'Gespeichert – Lager abgeglichen' : 'Gespeichert');
+    },
+    onError: (e: Error) => showToast(e.message, 'error'),
+  });
+
+  // Was nach dem Speichern im Lager stehen würde, je Lager-Material.
+  const summen = useMemo(() => {
+    const s: Record<string, { gramm: number; sorten: number }> = {};
+    for (const id of Object.values(zuordnung)) s[id] ??= { gramm: 0, sorten: 0 };
+    for (const sorte of stand.sorten) {
+      const id = zuordnung[sorte.schluessel];
+      if (!id) continue;
+      s[id].gramm += sorte.rest_g;
+      s[id].sorten += 1;
+    }
+    return s;
+  }, [stand.sorten, zuordnung]);
+
+  const geaendert = aktiv !== stand.aktiv || JSON.stringify(zuordnung) !== JSON.stringify(stand.zuordnung);
+  const ohneZuordnung = stand.sorten.filter(s => !zuordnung[s.schluessel]);
+  const sorteName = (s: FilamentDaten['sorten'][number]) =>
+    [s.material, s.subtype, s.brand, s.color_name].filter(Boolean).join(' · ') || '(ohne Angaben)';
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-white font-medium">Filamentbestand aus der Druckübersicht</div>
+              <div className="text-xs text-bambu-gray">
+                An = das Lager übernimmt bei jeder Prüfung das Restgewicht der Spulen hier aus dem Inventar und zieht bei
+                Drucken selbst kein Material mehr ab. Rollen anlegen, ins AMS zuordnen und wiegen geht dann nur noch hier.
+              </div>
+            </div>
+            <Toggle checked={aktiv} onChange={setAktiv} disabled={!darfAendern} />
+          </div>
+          {stand.aktiv && (
+            <div className="text-xs text-bambu-gray">
+              {stand.fehler
+                ? <span className="text-red-400">Letzter Abgleich fehlgeschlagen: {stand.fehler}</span>
+                : stand.letzter_abgleich
+                  ? <>Zuletzt abgeglichen: {zeit(stand.letzter_abgleich)}</>
+                  : 'Noch nicht abgeglichen.'}
+            </div>
+          )}
+          {stand.lager_fehler && <div className="text-sm text-red-400">{stand.lager_fehler}</div>}
+          {darfAendern && (
+            <div className="flex justify-end">
+              <Button onClick={() => speichern.mutate()} disabled={!geaendert || speichern.isPending}>
+                {speichern.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Speichern
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h2 className="text-white font-semibold">Sorten im Inventar</h2>
+          <p className="text-xs text-bambu-gray mt-1">
+            Ordne jede Sorte dem passenden Material im Lager zu. Mehrere Sorten dürfen zum selben Material gehören (z. B. zwei
+            Hersteller für „PLA Schwarz“). Nicht zugeordnete Sorten zählen im Lager nicht mit.
+          </p>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          {!stand.sorten.length ? (
+            <p className="text-sm text-bambu-gray">Im Inventar sind noch keine Spulen angelegt.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-bambu-gray text-left">
+                <tr>
+                  <th className="py-2 pr-4">Sorte</th>
+                  <th className="py-2 pr-4 text-right">Spulen</th>
+                  <th className="py-2 pr-4 text-right">Rest</th>
+                  <th className="py-2">Lager-Material</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stand.sorten.map(s => (
+                  <tr key={s.schluessel} className="border-t border-bambu-dark-tertiary">
+                    <td className="py-2 pr-4 text-white">
+                      <span className="inline-flex items-center gap-2">
+                        {s.rgba && (
+                          <span
+                            className="inline-block w-3.5 h-3.5 rounded-full border border-white/20"
+                            style={{ backgroundColor: `#${s.rgba.slice(0, 6)}` }}
+                          />
+                        )}
+                        {sorteName(s)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 text-right text-bambu-gray">{s.spulen}</td>
+                    <td className="py-2 pr-4 text-right text-white whitespace-nowrap">{gramm(s.rest_g)}</td>
+                    <td className="py-2">
+                      <select
+                        className={EINGABE}
+                        value={zuordnung[s.schluessel] ?? ''}
+                        disabled={!darfAendern || !stand.materialien.length}
+                        onChange={e => {
+                          const wert = e.target.value;
+                          setZuordnung(z => {
+                            const neu = { ...z };
+                            if (wert) neu[s.schluessel] = wert;
+                            else delete neu[s.schluessel];
+                            return neu;
+                          });
+                        }}
+                      >
+                        <option value="">– nicht ans Lager –</option>
+                        {stand.materialien.map(m => (
+                          <option key={m.id} value={m.id}>{m.name.trim()}{m.typ ? ` (${m.typ})` : ''}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {ohneZuordnung.length > 0 && stand.sorten.length > 0 && (
+            <p className="text-xs text-yellow-400 mt-3">{ohneZuordnung.length} Sorte(n) noch ohne Lager-Material.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {stand.materialien.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-white font-semibold">Im Lager</h2>
+            <p className="text-xs text-bambu-gray mt-1">
+              „Druckübersicht“ ist, was nach dem Speichern im Lager steht. Materialien ohne zugeordnete Sorte behält das Lager wie bisher.
+            </p>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-bambu-gray text-left">
+                <tr>
+                  <th className="py-2 pr-4">Material</th>
+                  <th className="py-2 pr-4 text-right">Lager jetzt</th>
+                  <th className="py-2 pr-4 text-right">Druckübersicht</th>
+                  <th className="py-2 text-right">Mindestbestand</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stand.materialien.map(m => {
+                  const summe = summen[m.id];
+                  const niedrig = summe && m.mindestbestand != null && summe.gramm <= m.mindestbestand;
+                  return (
+                    <tr key={m.id} className="border-t border-bambu-dark-tertiary">
+                      <td className="py-2 pr-4 text-white">{m.name.trim()}</td>
+                      <td className="py-2 pr-4 text-right text-bambu-gray whitespace-nowrap">{gramm(m.menge)}</td>
+                      <td className={`py-2 pr-4 text-right whitespace-nowrap ${niedrig ? 'text-yellow-400' : 'text-white'}`}>
+                        {summe ? gramm(summe.gramm) : <span className="text-bambu-gray">nicht zugeordnet</span>}
+                      </td>
+                      <td className="py-2 text-right text-bambu-gray whitespace-nowrap">{gramm(m.mindestbestand)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 

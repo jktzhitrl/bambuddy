@@ -2435,6 +2435,7 @@ export default {
     keepWarmMaxMinutesHelp: 'Wird die Druckplatte nicht innerhalb dieser Zeit geleert, werden die Heizungen abgeschaltet statt dauerhaft zu heizen.',
     gcodeInjection: 'G-Code-Injektion',
     gcodeInjectionDescription: 'Konfigurieren Sie benutzerdefinierten G-code, der am Anfang und/oder Ende von Drucken für Auto-Print-Systeme wie Farmloop, SwapMod, AutoClear und Printflow 3D eingefügt wird. Snippets werden pro Druckermodell konfiguriert und angewendet, wenn "G-code einfügen" bei einem Warteschlangen-Element aktiviert ist.',
+    gcodeOnlyPrinter: 'Nur dieser Drucker',
     gcodeInjectionNoPrinters: 'Keine Drucker gefunden. Fügen Sie Drucker hinzu, um G-code-Snippets zu konfigurieren.',
     gcodeStartLabel: 'Start-G-Code',
     gcodeEndLabel: 'End-G-Code',

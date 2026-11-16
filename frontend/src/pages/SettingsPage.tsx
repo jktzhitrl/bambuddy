@@ -6041,6 +6041,17 @@ export function SettingsPage() {
                   }
                 })();
                 const printerModels = [...new Set((printers || []).filter((p) => p.model).map((p) => p.model as string))].sort();
+                // Per-printer entries ("printer:<id>") override the model entry for that one printer.
+                const snippetEntries: { key: string; label: string }[] = [
+                  ...printerModels.map((model) => ({ key: model, label: model })),
+                  ...(printers || [])
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((p) => ({
+                      key: `printer:${p.id}`,
+                      label: `${t('settings.gcodeOnlyPrinter', 'Only this printer')}: ${p.name}`,
+                    })),
+                ];
 
                 const updateSnippet = (model: string, field: 'start_gcode' | 'end_gcode', value: string) => {
                   const updated = { ...gcodeSnippets };
@@ -6065,7 +6076,7 @@ export function SettingsPage() {
                   }
                 };
 
-                if (printerModels.length === 0) {
+                if (snippetEntries.length === 0) {
                   return (
                     <p className="text-sm text-bambu-gray italic">
                       {t('settings.gcodeInjectionNoPrinters', 'No printers found. Add printers to configure G-code snippets.')}
@@ -6073,7 +6084,7 @@ export function SettingsPage() {
                   );
                 }
 
-                return printerModels.map((model) => {
+                return snippetEntries.map(({ key: model, label }) => {
                   const snippet = gcodeSnippets[model] || { start_gcode: '', end_gcode: '' };
                   const hasContent = !!(snippet.start_gcode || snippet.end_gcode);
                   return (
@@ -6083,7 +6094,7 @@ export function SettingsPage() {
                       className="border border-bambu-dark-tertiary rounded-lg px-3 py-2"
                       summary={
                         <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-medium text-white">{model}</h4>
+                          <h4 className="text-sm font-medium text-white">{label}</h4>
                           {hasContent && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-bambu-green/20 text-bambu-green">
                               {t('settings.gcodeConfigured', 'Configured')}

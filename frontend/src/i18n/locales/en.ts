@@ -2455,6 +2455,7 @@ export default {
     keepWarmMaxMinutesHelp: 'If the plate is not cleared within this time, the heaters are switched off rather than held indefinitely.',
     gcodeInjection: 'G-code Injection',
     gcodeInjectionDescription: 'Configure custom G-code to inject at the start and/or end of prints for auto-print systems like Farmloop, SwapMod, AutoClear, and Printflow 3D. Snippets are configured per printer model and applied when "Inject G-code" is enabled on a queue item.',
+    gcodeOnlyPrinter: 'Only this printer',
     gcodeInjectionNoPrinters: 'No printers found. Add printers to configure G-code snippets.',
     gcodeStartLabel: 'Start G-code',
     gcodeEndLabel: 'End G-code',

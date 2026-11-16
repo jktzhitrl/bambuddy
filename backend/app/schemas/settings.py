@@ -186,7 +186,7 @@ class AppSettings(BaseModel):
     # Auto-print G-code injection (#422)
     gcode_snippets: str = Field(
         default="",
-        description="JSON: per-model G-code injection snippets {model: {start_gcode, end_gcode}}",
+        description="JSON: G-code injection snippets {model or "printer:<id>": {start_gcode, end_gcode}}; a printer entry overrides its model entry",
     )
 
     # Scheduled local backup (#884)
@@ -910,7 +910,7 @@ class AppSettingsUpdate(BaseModel):
         except json.JSONDecodeError:
             raise ValueError("gcode_snippets must be valid JSON or empty")
         if not isinstance(parsed, dict):
-            raise ValueError("gcode_snippets must be a JSON object keyed by printer model")
+            raise ValueError("gcode_snippets must be a JSON object keyed by printer model or "printer:<id>"")
         return v
 
     @field_validator("ldap_group_mapping")

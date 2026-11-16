@@ -963,6 +963,22 @@ def _unmatched_filament_message(required: list[dict], loaded: list[dict]) -> str
     )
 
 
+def _resolve_gcode_snippets(snippets: dict, printer_id: int, model: str | None) -> dict:
+    """Pick the G-code snippets for one printer.
+
+    A ``printer:<id>`` entry wins over the per-model entry, so a snippet (e.g.
+    a plate-eject routine that needs hardware only one machine has) can be
+    limited to a single printer while every other printer of that model keeps
+    using the model entry. The printer entry replaces the model entry rather
+    than merging with it.
+    """
+    per_printer = snippets.get(f"printer:{printer_id}")
+    if isinstance(per_printer, dict):
+        return per_printer
+    per_model = snippets.get(model) if model else None
+    return per_model if isinstance(per_model, dict) else {}
+
+
 def _effective_plate_id(explicit_plate_id: int | None, file_path: Path) -> int:
     """The plate to dispatch, resolved once in ``_start_print`` and reused at
     every call site below it: G-code injection, usage registration, rack-plan
@@ -7668,7 +7684,7 @@ class PrintScheduler:
                 snippets_raw = await self._get_setting(db, "gcode_snippets")
                 if snippets_raw:
                     snippets = json.loads(snippets_raw)
-                    model_snippets = snippets.get(printer.model, {})
+                    model_snippets = _resolve_gcode_snippets(snippets, printer.id, printer.model)
                     start_gc = (model_snippets.get("start_gcode") or "").strip()
                     end_gc = (model_snippets.get("end_gcode") or "").strip()
                     if start_gc or end_gc:
